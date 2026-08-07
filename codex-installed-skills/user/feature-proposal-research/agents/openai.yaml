@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature Proposal Research"
+  short_description: "Research alternatives before feature code"
+  default_prompt: "Use $feature-proposal-research to compare implementation options before building this feature."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Harness Architect"
+  short_description: "Design reliable agent harnesses"
+  default_prompt: "Use $ai-harness-architect to design an AI harness for this app."

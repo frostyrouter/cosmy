@@ -1,0 +1,4 @@
+interface:
+  display_name: "Monochrome Utility Websites"
+  short_description: "Build elegant, motion-rich utility websites"
+  default_prompt: "Use $build-monochrome-utility-websites to design and implement a polished monochrome utility website with restrained motion and excellent responsive behavior."

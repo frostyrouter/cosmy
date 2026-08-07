@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Writer"
+  short_description: "Rules for maintainable production code"
+  default_prompt: "Use $code-writer to implement this change with disciplined structure, edge-case handling, and tests."
