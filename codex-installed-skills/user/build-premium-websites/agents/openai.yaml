@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Premium Websites"
+  short_description: "Create polished, cinematic product websites"
+  default_prompt: "Use $build-premium-websites to design and implement a polished, responsive product website."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write AI Harness"
+  short_description: "Design reliable agent harnesses"
+  default_prompt: "Use -ai-harness to design an AI harness for this app."
