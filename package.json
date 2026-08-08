@@ -11,6 +11,7 @@
     "start": "node dist/server.js",
     "test": "vitest run --testTimeout=15000",
     "test:watch": "vitest",
+    "integration:smoke": "node scripts/integration-smoke.mjs",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
