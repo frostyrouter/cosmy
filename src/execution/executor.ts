@@ -1,10 +1,8 @@
 import { performance } from 'node:perf_hooks';
 import type { ProviderAdapter } from '../ports/provider.js';
 import type { HealthStore, UsageLedger } from '../ports/stores.js';
-import type { ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
-import { providerForModel } from '../providers/simulator.js';
-import { RequestCancelledError } from '../domain/errors.js';
-import { ProviderError } from '../domain/errors.js';
+import type { ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
+import { ProviderError, RequestCancelledError } from '../domain/errors.js';
 import type { MetricsSink } from '../observability/metrics.js';
 
 export interface ExecutionOptions {
@@ -15,12 +13,22 @@ export interface ExecutionOptions {
 }
 
 export class RequestExecutor {
+  private readonly providerByName: Map<string, ProviderAdapter>;
+
   constructor(
     private readonly providers: readonly ProviderAdapter[],
     private readonly usage: UsageLedger,
     private readonly health: HealthStore,
     private readonly metrics?: MetricsSink,
-  ) {}
+  ) {
+    this.providerByName = new Map(providers.map((provider) => [provider.name, provider]));
+  }
+
+  private providerFor(model: ModelConfiguration): ProviderAdapter {
+    const provider = this.providerByName.get(model.provider);
+    if (!provider) throw new ProviderError(`Provider '${model.provider}' is not configured`, false);
+    return provider;
+  }
 
   async execute(options: ExecutionOptions): Promise<ResponseResult> {
     const { request, route, requestId, signal } = options;
@@ -60,7 +68,7 @@ export class RequestExecutor {
 
   private async executeCandidate(options: ExecutionOptions & { fallbackIndex: number }): Promise<ResponseResult> {
     const { request, route, requestId, signal, fallbackIndex } = options;
-    const provider = providerForModel(this.providers, route.selected.model);
+    const provider = this.providerFor(route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
@@ -82,7 +90,7 @@ export class RequestExecutor {
 
   private async *streamCandidate(options: ExecutionOptions & { fallbackIndex: number }): AsyncIterable<ResponseChunk> {
     const { request, route, requestId, signal, fallbackIndex } = options;
-    const provider = providerForModel(this.providers, route.selected.model);
+    const provider = this.providerFor(route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();

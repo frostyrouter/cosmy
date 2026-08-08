@@ -1,6 +1,6 @@
 import type { ModelConfiguration, ResponseChunk } from '../domain/types.js';
 import type { ProviderAdapter, ProviderRequest, ProviderResponse } from '../ports/provider.js';
-import { ProviderError, RequestCancelledError } from '../domain/errors.js';
+import { RequestCancelledError } from '../domain/errors.js';
 
 function outputFor(request: ProviderRequest): string {
   const prompt = request.request.messages.at(-1)?.content ?? '';
@@ -54,10 +54,4 @@ export class SimulatorProvider implements ProviderAdapter {
       signal.addEventListener('abort', () => { clearTimeout(timer); reject(new RequestCancelledError()); }, { once: true });
     });
   }
-}
-
-export function providerForModel(providers: readonly ProviderAdapter[], model: ModelConfiguration): ProviderAdapter {
-  const provider = providers.find((candidate) => candidate.name === model.provider);
-  if (!provider) throw new ProviderError(`Provider '${model.provider}' is not configured`, false);
-  return provider;
 }
