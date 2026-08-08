@@ -1,8 +1,8 @@
 import { performance } from 'node:perf_hooks';
 import { buildApp } from '../src/app.js';
 
-const TOTAL = Number(process.env.BENCH_TOTAL ?? 10_000);
-const CONCURRENCY = Number(process.env.BENCH_CONCURRENCY ?? 100);
+const TOTAL = Number(process.env.BENCH_TOTAL ?? 20_000);
+const CONCURRENCY = Number(process.env.BENCH_CONCURRENCY ?? 64);
 const PAYLOAD = process.env.BENCH_PAYLOAD ?? 'simple';
 
 function makeBody(): object {
