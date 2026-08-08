@@ -11,6 +11,10 @@ function outputFor(request: ProviderRequest): string {
 
 function tokenCount(value: string): number { return Math.max(1, Math.ceil(value.length / 4)); }
 
+function inputTokenCount(input: ProviderRequest): number {
+  return input.request.messages.reduce((sum, message) => sum + tokenCount(message.content), 0);
+}
+
 export class SimulatorProvider implements ProviderAdapter {
   readonly name = 'simulator';
 
@@ -24,7 +28,7 @@ export class SimulatorProvider implements ProviderAdapter {
     const output = outputFor(input);
     return {
       output,
-      usage: { inputTokens: input.request.messages.reduce((sum, message) => sum + tokenCount(message.content), 0), outputTokens: tokenCount(output), totalTokens: tokenCount(output), estimatedCostUsd: 0 },
+      usage: { inputTokens: inputTokenCount(input), outputTokens: tokenCount(output), totalTokens: inputTokenCount(input) + tokenCount(output), estimatedCostUsd: 0 },
       finishReason: 'stop',
     };
   }
@@ -39,7 +43,8 @@ export class SimulatorProvider implements ProviderAdapter {
       yield { requestId: input.request.requestId ?? 'unknown', index, delta, done: false };
     }
     const outputTokens = tokenCount(output);
-    yield { requestId: input.request.requestId ?? 'unknown', index: pieces.length, delta: '', done: true, usage: { inputTokens: input.request.messages.reduce((sum, message) => sum + tokenCount(message.content), 0), outputTokens, totalTokens: outputTokens, estimatedCostUsd: 0 } };
+    const inputTokens = inputTokenCount(input);
+    yield { requestId: input.request.requestId ?? 'unknown', index: pieces.length, delta: '', done: true, usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, estimatedCostUsd: 0 } };
   }
 
   private delay(signal: AbortSignal): Promise<void> {
