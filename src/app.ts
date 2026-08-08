@@ -11,6 +11,7 @@ import { RequestExecutor } from './execution/executor.js';
 import { resilientProviders } from './execution/resilience.js';
 import { RouterService } from './service/router-service.js';
 import { registerRoutes } from './api/http.js';
+import { InMemoryMetrics } from './observability/metrics.js';
 import { loadConfig, type AppConfig } from './config.js';
 
 export interface AppDependencies {
@@ -26,9 +27,10 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const registry = dependencies.registry ?? new InMemoryModelRegistry([...defaultModels, ...configuredModelManifests()]);
   const usage = dependencies.usage ?? new InMemoryUsageLedger();
   const health = dependencies.health ?? new InMemoryHealthStore();
+  const metrics = new InMemoryMetrics();
   const router = new DeterministicRouter(registry);
   const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
-  const executor = new RequestExecutor(providers, usage, health);
+  const executor = new RequestExecutor(providers, usage, health, metrics);
   registerRoutes(app, new RouterService(router, executor));
   return app;
 }
