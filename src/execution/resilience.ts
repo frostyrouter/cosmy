@@ -28,7 +28,7 @@ function retryable(error: unknown): boolean { return error instanceof ProviderEr
 function attemptSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortSignal; cancel: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const cancel = () => { clearTimeout(timer); controller.abort(); };
+  const cancel = () => { clearTimeout(timer); controller.abort(); parent.removeEventListener('abort', cancel); };
   if (parent.aborted) cancel();
   else parent.addEventListener('abort', cancel, { once: true });
   return { signal: controller.signal, cancel };
