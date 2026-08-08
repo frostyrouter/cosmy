@@ -4,7 +4,6 @@ import type { HealthStore, UsageLedger } from '../ports/stores.js';
 import type { ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
 import { providerForModel } from '../providers/simulator.js';
 import { RequestCancelledError } from '../domain/errors.js';
-import { nowIso } from '../util/ids.js';
 
 export interface ExecutionOptions {
   requestId: string;
@@ -25,15 +24,16 @@ export class RequestExecutor {
     if (signal.aborted) throw new RequestCancelledError();
     const provider = providerForModel(this.providers, route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
-    await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
+    const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
     try {
       const response = await provider.complete({ request: { ...request, requestId }, model: route.selected.model, signal });
       this.health.markSuccess(route.selected.model.id, performance.now() - started);
-      await this.usage.record({ tenantId, usage: response.usage });
+      await this.usage.reconcile(reservation, response.usage.estimatedCostUsd);
       return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
       this.health.markFailure(route.selected.model.id);
+      await this.usage.reconcile(reservation, 0);
       throw error;
     }
   }
@@ -43,19 +43,24 @@ export class RequestExecutor {
     if (signal.aborted) throw new RequestCancelledError();
     const provider = providerForModel(this.providers, route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
-    await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
+    const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
+    let actualCostUsd = 0;
+    let completed = false;
     try {
       for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal })) {
         yield { ...chunk, requestId };
         if (chunk.done && chunk.usage) {
           this.health.markSuccess(route.selected.model.id, performance.now() - started);
-          await this.usage.record({ tenantId, usage: chunk.usage });
+          actualCostUsd = chunk.usage.estimatedCostUsd;
+          completed = true;
         }
       }
     } catch (error) {
       this.health.markFailure(route.selected.model.id);
       throw error;
+    } finally {
+      await this.usage.reconcile(reservation, completed ? actualCostUsd : 0);
     }
   }
 }
