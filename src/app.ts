@@ -16,6 +16,8 @@ import { loadConfig, type AppConfig } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
 import type { HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
 import type { MetricsSink } from './observability/metrics.js';
+import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
+import { PostgresReservationRepository } from './persistence/sql-adapters.js';
 
 export interface AppDependencies {
   registry?: ModelRegistry;
@@ -30,7 +32,21 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   await app.register(cors, { origin: false });
   await app.register(rateLimit, { max: config.environment === 'production' ? 120 : 1_000, timeWindow: '1 minute' });
   const registry = dependencies.registry ?? new InMemoryModelRegistry([...defaultModels, ...configuredModelManifests()]);
-  const usage = dependencies.usage ?? new InMemoryUsageLedger();
+  let postgres: PostgresSqlClient | undefined;
+  let usage = dependencies.usage;
+  if (!usage && config.persistenceMode === 'postgres') {
+    if (!config.databaseUrl) throw new Error('DATABASE_URL is required when PERSISTENCE_MODE=postgres');
+    postgres = await createPostgresSqlClient(config.databaseUrl);
+    try {
+      await applyControlPlaneMigration(postgres);
+      usage = new PostgresReservationRepository(postgres);
+    } catch (error) {
+      await postgres.close();
+      throw error;
+    }
+    app.addHook('onClose', async () => { await postgres?.close(); });
+  }
+  usage ??= new InMemoryUsageLedger();
   const health = dependencies.health ?? new InMemoryHealthStore();
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
   const router = new DeterministicRouter(registry);

@@ -5,6 +5,8 @@ export interface AppConfig {
   environment: 'development' | 'test' | 'production';
   requestTimeoutMs: number;
   providerMaxRetries: number;
+  persistenceMode?: 'memory' | 'postgres';
+  databaseUrl?: string;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -24,5 +26,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     environment: environment as AppConfig['environment'],
     requestTimeoutMs: numberEnv(env.REQUEST_TIMEOUT_MS, 60_000),
     providerMaxRetries: numberEnv(env.PROVIDER_MAX_RETRIES, 2),
+    persistenceMode: env.PERSISTENCE_MODE === 'postgres' ? 'postgres' : 'memory',
+    ...(env.DATABASE_URL ? { databaseUrl: env.DATABASE_URL } : {}),
   };
 }

@@ -33,6 +33,8 @@ services:
       PORT: 8080
       REQUEST_TIMEOUT_MS: 10000
       PROVIDER_MAX_RETRIES: 0
+      PERSISTENCE_MODE: postgres
+      DATABASE_URL: postgresql://cosmy:cosmy@postgres:5432/cosmy
     depends_on:
       postgres:
         condition: service_healthy
