@@ -10,12 +10,12 @@ The service composes four replaceable parts:
 
 1. `DeterministicRouter` extracts request features, filters models by hard constraints, and ranks eligible candidates.
 2. `RequestExecutor` reserves budget, invokes the selected provider, records usage, and updates health.
-3. `Provider` hides provider-specific transport and normalization.
+3. `ProviderAdapter` hides provider-specific transport and normalization.
 4. `ModelRegistry` and stores provide the control-plane data boundary; memory implementations make local tests deterministic.
 
 ## Simulator first
 
-The simulator is intentionally the default provider. It exercises complete and SSE paths without credentials, network calls, or billing. Real adapters run behind the same asynchronous `Provider` interface and have contract tests.
+The simulator is intentionally the default provider. It exercises complete and SSE paths without credentials, network calls, or billing. Real adapters can be added behind the same `ProviderAdapter` interface after their contract tests exist.
 
 ## Routing behavior
 
@@ -23,12 +23,12 @@ The 2D coordinates remain explainability metadata. Eligibility is always decided
 
 ## Development commands
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m ruff check cosmy tests scripts
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m uvicorn cosmy.app:app --reload
+```bash
+npm install
+npm run lint
+npm test
+npm run build
+npm run dev
 ```
 
 The service listens on `http://localhost:8080` by default. A minimal request is:
@@ -37,4 +37,4 @@ The service listens on `http://localhost:8080` by default. A minimal request is:
 {"messages":[{"role":"user","content":"Rewrite this email politely"}]}
 ```
 
-Use `"stream": true` to receive Server-Sent Events. Disconnecting the client stops stream iteration and releases its reservation.
+Use `"stream": true` to receive Server-Sent Events. Disconnecting the client aborts provider work through the request-local `AbortSignal`.
