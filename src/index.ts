@@ -11,3 +11,5 @@ export * from './providers/configured.js';
 export * from './execution/resilience.js';
 export * from './observability/metrics.js';
 export * from './ports/stores.js';
+export * from './evaluation/harness.js';
+export * from './evaluation/default-cases.js';
