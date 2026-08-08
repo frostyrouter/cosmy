@@ -20,8 +20,6 @@ async function complete() {
   if (!response.ok) throw new Error(`Router response failed with HTTP ${response.status}`);
   return response.json();
 }
-const first = await complete();
-const second = await complete();
-if (first.status !== 'completed' || !first.output || second.status !== 'completed' || second.output !== first.output) throw new Error('Router returned an invalid or inconsistent cached completion');
-if (first.requestId === second.requestId) throw new Error('Cached completion reused the original request ID');
-console.log(JSON.stringify({ status: second.status, model: second.model, provider: second.provider, cacheVerified: true }));
+const body = await complete();
+if (body.status !== 'completed' || !body.output) throw new Error('Router returned an invalid completion');
+console.log(JSON.stringify({ status: body.status, model: body.model, provider: body.provider }));

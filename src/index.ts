@@ -16,4 +16,3 @@ export * from './evaluation/default-cases.js';
 export * from './persistence/contracts.js';
 export * from './persistence/memory-cache.js';
 export * from './persistence/sql-adapters.js';
-export * from './persistence/redis-adapter.js';

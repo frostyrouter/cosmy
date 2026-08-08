@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { PostgresRegistryRepository, PostgresReservationRepository, type SqlClient } from '../src/persistence/sql-adapters.js';
-import { RedisResponseCache, type RedisClient } from '../src/persistence/redis-adapter.js';
 import { defaultModels } from '../src/registry/default-models.js';
 
 describe('durable persistence adapters', () => {
@@ -24,14 +23,5 @@ describe('durable persistence adapters', () => {
     const reservation = await repository.reserve({ tenantId: 'acme', estimatedCostUsd: 0.01 });
     await repository.reconcile(reservation, 0.004);
     expect(await repository.usageFor('acme')).toEqual({ reservedUsd: 0, spentUsd: 0.004 });
-  });
-
-  it('stores Redis values with a namespace and TTL', async () => {
-    const values = new Map<string, string>();
-    const redis: RedisClient = { get: async (key) => values.get(key) ?? null, set: async (key, value) => { values.set(key, value); }, del: async (key) => values.delete(key) ? 1 : 0 };
-    const cache = new RedisResponseCache(redis, 'test:');
-    await cache.set('key', 'value', 30);
-    expect(await cache.get('key')).toMatchObject({ value: 'value' });
-    expect(values.has('test:key')).toBe(true);
   });
 });

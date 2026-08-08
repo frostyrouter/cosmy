@@ -19,8 +19,6 @@ import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
 import { PostgresReservationRepository } from './persistence/sql-adapters.js';
 import { InMemoryResponseCache } from './persistence/memory-cache.js';
-import { RedisResponseCache } from './persistence/redis-adapter.js';
-import { createRedisConnection, type RedisConnection } from './persistence/redis.js';
 
 export interface AppDependencies {
   registry?: ModelRegistry;
@@ -51,14 +49,8 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     app.addHook('onClose', async () => { await postgres?.close(); });
   }
   usage ??= new InMemoryUsageLedger();
-  let redis: RedisConnection | undefined;
   let cache = dependencies.cache;
-  if (!cache && config.cacheMode === 'redis') {
-    if (!config.redisUrl) throw new Error('REDIS_URL is required when CACHE_MODE=redis');
-    redis = await createRedisConnection(config.redisUrl);
-    cache = new RedisResponseCache(redis);
-    app.addHook('onClose', async () => { await redis?.close(); });
-  } else if (!cache && config.cacheMode === 'memory') {
+  if (!cache && config.cacheMode === 'memory') {
     cache = new InMemoryResponseCache();
   }
   const health = dependencies.health ?? new InMemoryHealthStore();
