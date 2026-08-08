@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks';
 import type { ProviderAdapter } from '../ports/provider.js';
 import type { HealthStore, UsageLedger, UsageReservation } from '../ports/stores.js';
 import type { ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
-import { ProviderError, RequestCancelledError } from '../domain/errors.js';
+import { ProviderError, RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { MetricsSink } from '../observability/metrics.js';
 
 export interface ExecutionOptions {
@@ -37,7 +37,7 @@ export class RequestExecutor {
     const effective = deadline?.signal ?? signal;
     try {
       if (effective.aborted) throw new RequestCancelledError();
-      if (route.alternatives.length === 0) return this.executeCandidate({ requestId, route, request, signal: effective, fallbackIndex: 0 });
+      if (route.alternatives.length === 0) return await this.executeCandidate({ requestId, route, request, signal: effective, fallbackIndex: 0 });
       const candidates = [route.selected, ...route.alternatives];
       let lastError: unknown;
       for (const [fallbackIndex, candidate] of candidates.entries()) {
@@ -50,6 +50,11 @@ export class RequestExecutor {
         }
       }
       throw lastError instanceof Error ? lastError : new ProviderError('All route candidates failed');
+    } catch (error) {
+      if (deadline?.signal.aborted && !signal.aborted) {
+        throw new RouterError('Request exceeded the configured deadline', 'timeout', 504, true);
+      }
+      throw error;
     } finally {
       deadline?.dispose();
     }

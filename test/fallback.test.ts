@@ -81,7 +81,7 @@ describe('fallback execution and metrics', () => {
     const executor = new RequestExecutor(resilient, new InMemoryUsageLedger(), new InMemoryHealthStore(), undefined, 150);
     const request = { messages: [{ role: 'user' as const, content: 'hello' }] };
     const started = Date.now();
-    await expect(executor.execute({ requestId: 'req_deadline', route, request, signal: new AbortController().signal })).rejects.toThrow('cancelled');
+    await expect(executor.execute({ requestId: 'req_deadline', route, request, signal: new AbortController().signal })).rejects.toMatchObject({ code: 'timeout', statusCode: 504 });
     expect(Date.now() - started).toBeLessThan(300);
   });
 

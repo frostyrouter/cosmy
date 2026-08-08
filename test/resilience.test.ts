@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderError } from '../src/domain/errors.js';
+import { ProviderError, RequestCancelledError } from '../src/domain/errors.js';
 import { ResilientProvider } from '../src/execution/resilience.js';
 import type { ProviderAdapter } from '../src/ports/provider.js';
 import { defaultModels } from '../src/registry/default-models.js';
@@ -34,5 +34,17 @@ describe('provider resilience', () => {
     const chunks: string[] = [];
     for await (const chunk of resilient.stream({ request: { requestId: 'req_stream_timeout', messages: [{ role: 'user', content: 'hi' }] }, model, signal: new AbortController().signal })) chunks.push(chunk.delta);
     expect(chunks).toEqual(['first', ' second']);
+  });
+
+  it('does not count client cancellations toward the circuit breaker', async () => {
+    const provider: ProviderAdapter = { name: 'simulator', listModels: () => [model], complete: async (input) => { if (input.signal.aborted) throw new RequestCancelledError(); return { output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }; }, stream: async function* () {} };
+    const resilient = new ResilientProvider(provider, { maxRetries: 0, timeoutMs: 1_000, baseDelayMs: 0, failureThreshold: 3, cooldownMs: 60_000 });
+    const cancelled = new AbortController();
+    cancelled.abort();
+    for (let i = 0; i < 5; i++) {
+      await expect(resilient.complete({ ...request, signal: cancelled.signal })).rejects.toThrow('cancelled');
+    }
+    const result = await resilient.complete(request);
+    expect(result.output).toBe('ok');
   });
 });

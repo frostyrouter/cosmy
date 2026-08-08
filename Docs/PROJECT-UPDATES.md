@@ -48,3 +48,13 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files or subsystems: Execution, persistence cache, HTTP API, routing policy, resilience, CI, tests.
 - Validation: 47 automated tests (3 new regression tests), TypeScript lint, production build, live HTTP smoke (stream abort, 50 concurrent requests, server restart), and `npm start` smoke test.
 - Known limitations and follow-up: Postgres-backed budget enforcement and per-tenant auth remain open; reconciliation failure is retried once then released as best-effort, which under persistent store outages can leave a reservation un-reconciled.
+
+## 2026-08-09 - Deadline fast-path fix, timeout semantics, and rate-limit edge
+
+- Change: Fixed a real deadline bug where the overall request deadline was disposed immediately on the single-candidate fast path (the un-awaited return let `finally` clear the timer before execution started), so `REQUEST_TIMEOUT_MS` was not enforced for the most common routing outcome.
+- Change: Deadline expiry now surfaces as HTTP 504 `timeout` (retryable) instead of `499 request_cancelled`, so server-side timeouts are distinguishable from client cancellations.
+- Change: Client cancellations no longer count toward opening the circuit breaker; a `RATE_LIMIT_MAX=0` value now disables rate limiting instead of failing every request with 400; the response-cache key registry version is read lazily so a runtime registry publish invalidates cached routes.
+- Impact: Timeouts are enforced on every execution path, timeout errors carry a retryable 504, cancellation storms no longer trip breakers, and zero rate limits behave as documented.
+- Files or subsystems: Execution, resilience, configuration, cache, tests.
+- Validation: 50 automated tests (2 new regression tests), TypeScript lint, live HTTP verification of the 504 timeout path and `RATE_LIMIT_MAX=0`.
+- Known limitations and follow-up: Streaming requests still have no total-duration bound by design; half-open breaker probes are not concurrency-limited.

@@ -65,8 +65,8 @@ export class ResilientProvider implements ProviderAdapter {
       } catch (error) {
         current.cancel();
         lastError = error;
-        if (retryable(error)) this.breaker.failure();
         if (input.signal.aborted) throw new RequestCancelledError();
+        if (retryable(error)) this.breaker.failure();
         if (!retryable(error) || attempt === this.options.maxRetries) throw error;
         await wait(this.options.baseDelayMs ?? 100 * (2 ** attempt), input.signal);
       }
@@ -92,8 +92,8 @@ export class ResilientProvider implements ProviderAdapter {
       } catch (error) {
         current.cancel();
         lastError = error;
-        if (retryable(error)) this.breaker.failure();
         if (input.signal.aborted) throw new RequestCancelledError();
+        if (retryable(error)) this.breaker.failure();
         if (emitted || !retryable(error) || attempt === this.options.maxRetries) throw error;
         await wait(this.options.baseDelayMs ?? 100 * (2 ** attempt), input.signal);
       }

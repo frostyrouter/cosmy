@@ -36,7 +36,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   });
   await app.register(cors, { origin: false });
   const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
-  await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
+  if (rateLimitMax > 0) await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
   if (config.apiKey) {
     app.addHook('preHandler', async (request, reply) => {
       if (request.routeOptions.url === '/healthz' || request.routeOptions.url === '/readyz') return;
@@ -76,7 +76,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
         try { await db.query('SELECT 1'); return true; } catch { return false; }
       }
     : undefined;
-  const registryVersion = (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
+  const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion), readyCheck);
   return app;
 }

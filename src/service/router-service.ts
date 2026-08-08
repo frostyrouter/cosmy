@@ -17,7 +17,7 @@ export class RouterService {
     private readonly executor: RequestExecutor,
     private readonly cache?: ResponseCache,
     private readonly cacheTtlSeconds = 0,
-    private readonly registryVersion?: number,
+    private readonly getRegistryVersion?: () => number | undefined,
   ) {}
 
   async complete(request: ResponseRequest, signal: AbortSignal): Promise<ResponseResult> {
@@ -25,7 +25,7 @@ export class RouterService {
     const route = this.router.decide(id, request);
     const cache = this.cache;
     if (!cache || this.cacheTtlSeconds <= 0) return this.executor.execute({ requestId: id, route, request, signal });
-    const key = cacheKey(request, this.router.policyVersion, this.registryVersion);
+    const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.());
     try {
       const cached = await cache.get(key);
       if (cached) {
