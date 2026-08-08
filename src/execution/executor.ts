@@ -33,6 +33,7 @@ export class RequestExecutor {
   async execute(options: ExecutionOptions): Promise<ResponseResult> {
     const { request, route, requestId, signal } = options;
     if (signal.aborted) throw new RequestCancelledError();
+    if (route.alternatives.length === 0) return this.executeCandidate({ requestId, route, request, signal, fallbackIndex: 0 });
     const candidates = [route.selected, ...route.alternatives];
     let lastError: unknown;
     for (const [fallbackIndex, candidate] of candidates.entries()) {
@@ -50,6 +51,10 @@ export class RequestExecutor {
   async *stream(options: ExecutionOptions): AsyncIterable<ResponseChunk> {
     const { request, route, requestId, signal } = options;
     if (signal.aborted) throw new RequestCancelledError();
+    if (route.alternatives.length === 0) {
+      for await (const chunk of this.streamCandidate({ requestId, route, request, signal, fallbackIndex: 0 })) yield chunk;
+      return;
+    }
     const candidates = [route.selected, ...route.alternatives];
     for (const [fallbackIndex, candidate] of candidates.entries()) {
       const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };

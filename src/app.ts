@@ -31,6 +31,9 @@ export interface AppDependencies {
 
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: { level: config.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
+    try { done(null, JSON.parse(String(body))); } catch { done(new Error('Invalid JSON body')); }
+  });
   await app.register(cors, { origin: false });
   const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
   await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
