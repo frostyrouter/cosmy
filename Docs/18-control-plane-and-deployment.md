@@ -14,4 +14,4 @@ Never mutate a model manifest in place. Publish a new snapshot for pricing, capa
 
 ## Container and CI boundary
 
-The container runs the compiled server as a non-root user. CI runs the same `npm ci`, lint, test, and build commands used locally. No provider API keys are required for CI because all provider calls are mocked or simulated.
+The container runs Uvicorn with FastAPI as a non-root user, using uvloop and httptools on Linux. CI installs the Python package, runs Ruff checks, verifies formatting, and runs pytest. No provider API keys are required because provider calls are mocked or simulated.
