@@ -62,6 +62,19 @@ class MemoryHealthStore:
         self.failures[model_id] = self.failures.get(model_id, 0) + 1
         self.updated[model_id] = now_iso()
 
+    def snapshot(self) -> list[dict[str, object]]:
+        model_ids = sorted(self.successes.keys() | self.failures.keys())
+        return [
+            {
+                "modelId": model_id,
+                "successes": self.successes.get(model_id, 0),
+                "failures": self.failures.get(model_id, 0),
+                **({"lastLatencyMs": self.latencies[model_id]} if model_id in self.latencies else {}),
+                "updatedAt": self.updated.get(model_id, "1970-01-01T00:00:00Z"),
+            }
+            for model_id in model_ids
+        ]
+
 
 @dataclass(frozen=True, slots=True)
 class RequestMetric:
@@ -83,6 +96,26 @@ class MemoryMetrics:
         if len(self.values) >= self.capacity:
             del self.values[: max(1, self.capacity // 10)]
         self.values.append(metric)
+
+    def snapshot(self) -> dict[str, object]:
+        latencies = sorted(metric.latency_ms for metric in self.values)
+        usages = [metric.usage for metric in self.values if metric.usage is not None]
+        p95_index = min(len(latencies) - 1, max(0, int(len(latencies) * 0.95))) if latencies else 0
+        return {
+            "requests": len(self.values),
+            "successes": sum(metric.status == "success" for metric in self.values),
+            "errors": sum(metric.status == "error" for metric in self.values),
+            "cancellations": sum(metric.status == "cancelled" for metric in self.values),
+            "fallbacks": sum(metric.fallback_index > 0 for metric in self.values),
+            "inputTokens": sum(usage.input_tokens for usage in usages),
+            "outputTokens": sum(usage.output_tokens for usage in usages),
+            "totalCostUsd": sum(usage.estimated_cost_usd for usage in usages),
+            "latencyMs": {
+                "count": len(latencies),
+                "total": sum(latencies),
+                "p95": latencies[p95_index] if latencies else 0,
+            },
+        }
 
 
 @dataclass(slots=True)
