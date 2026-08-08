@@ -20,6 +20,7 @@ export class RequestExecutor {
     private readonly usage: UsageLedger,
     private readonly health: HealthStore,
     private readonly metrics?: MetricsSink,
+    private readonly requestTimeoutMs?: number,
   ) {
     this.providerByName = new Map(providers.map((provider) => [provider.name, provider]));
   }
@@ -32,20 +33,26 @@ export class RequestExecutor {
 
   async execute(options: ExecutionOptions): Promise<ResponseResult> {
     const { request, route, requestId, signal } = options;
-    if (signal.aborted) throw new RequestCancelledError();
-    if (route.alternatives.length === 0) return this.executeCandidate({ requestId, route, request, signal, fallbackIndex: 0 });
-    const candidates = [route.selected, ...route.alternatives];
-    let lastError: unknown;
-    for (const [fallbackIndex, candidate] of candidates.entries()) {
-      const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
-      try {
-        return await this.executeCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex });
-      } catch (error) {
-        lastError = error;
-        if (request.policy?.allowFallback === false || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+    const deadline = this.requestTimeoutMs !== undefined ? abortAfter(signal, this.requestTimeoutMs) : undefined;
+    const effective = deadline?.signal ?? signal;
+    try {
+      if (effective.aborted) throw new RequestCancelledError();
+      if (route.alternatives.length === 0) return this.executeCandidate({ requestId, route, request, signal: effective, fallbackIndex: 0 });
+      const candidates = [route.selected, ...route.alternatives];
+      let lastError: unknown;
+      for (const [fallbackIndex, candidate] of candidates.entries()) {
+        const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
+        try {
+          return await this.executeCandidate({ requestId, route: attemptRoute, request, signal: effective, fallbackIndex });
+        } catch (error) {
+          lastError = error;
+          if (request.policy?.allowFallback === false || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+        }
       }
+      throw lastError instanceof Error ? lastError : new ProviderError('All route candidates failed');
+    } finally {
+      deadline?.dispose();
     }
-    throw lastError instanceof Error ? lastError : new ProviderError('All route candidates failed');
   }
 
   async *stream(options: ExecutionOptions): AsyncIterable<ResponseChunk> {
@@ -125,11 +132,16 @@ export class RequestExecutor {
   }
 }
 
-export function abortAfter(signal: AbortSignal, timeoutMs: number): AbortController {
+export interface Deadline { signal: AbortSignal; dispose: () => void; }
+
+export function abortAfter(signal: AbortSignal, timeoutMs: number): Deadline {
   const controller = new AbortController();
   const onParentAbort = () => { clearTimeout(timer); controller.abort(); };
   const timer = setTimeout(() => { signal.removeEventListener('abort', onParentAbort); controller.abort(); }, timeoutMs);
   signal.addEventListener('abort', onParentAbort, { once: true });
   controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
-  return controller;
+  return {
+    signal: controller.signal,
+    dispose: () => { clearTimeout(timer); signal.removeEventListener('abort', onParentAbort); },
+  };
 }

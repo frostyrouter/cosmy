@@ -5,9 +5,10 @@ import { DeterministicRouter } from '../routing/router.js';
 import { RequestExecutor } from '../execution/executor.js';
 import type { ResponseCache } from '../persistence/contracts.js';
 
-function cacheKey(request: ResponseRequest): string {
+function cacheKey(request: ResponseRequest, policyVersion: string | undefined, registryVersion: number | undefined): string {
   const normalized = { ...request, requestId: undefined, stream: false };
-  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+  const versioned = `${policyVersion ?? 'unknown'}|${registryVersion ?? 'unknown'}|${JSON.stringify(normalized)}`;
+  return createHash('sha256').update(versioned).digest('hex');
 }
 
 export class RouterService {
@@ -16,6 +17,7 @@ export class RouterService {
     private readonly executor: RequestExecutor,
     private readonly cache?: ResponseCache,
     private readonly cacheTtlSeconds = 0,
+    private readonly registryVersion?: number,
   ) {}
 
   async complete(request: ResponseRequest, signal: AbortSignal): Promise<ResponseResult> {
@@ -23,7 +25,7 @@ export class RouterService {
     const route = this.router.decide(id, request);
     const cache = this.cache;
     if (!cache || this.cacheTtlSeconds <= 0) return this.executor.execute({ requestId: id, route, request, signal });
-    const key = cacheKey(request);
+    const key = cacheKey(request, this.router.policyVersion, this.registryVersion);
     try {
       const cached = await cache.get(key);
       if (cached) {

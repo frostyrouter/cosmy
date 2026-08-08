@@ -27,3 +27,14 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files or subsystems: Routing policy, execution/resilience, provider adapters, HTTP API, persistence, configuration, metrics, tests.
 - Validation: 37 automated tests (10 new regression tests), TypeScript lint, and the latency benchmark.
 - Known limitations and follow-up: `TENANT_BUDGET_USD` is enforced in memory mode only; PostgreSQL-backed budget enforcement and per-tenant limit configuration are not yet implemented. Request/attempt counters in metrics still count attempts (asserted by tests); only the fallback counter changed semantics.
+
+## 2026-08-09 - Authentication, request deadlines, and API hardening
+
+- Change: Added optional inbound API-key authentication (`COSMY_API_KEY`); when set, `/v1/responses` requires `Authorization: Bearer <key>` while `/healthz` and `/readyz` stay open for probes.
+- Change: Added an overall request deadline for non-streaming execution so total wall time (candidates x retries) is bounded by `REQUEST_TIMEOUT_MS`; streaming keeps its time-to-first-token semantics and is not truncated.
+- Change: Exempted health endpoints from the rate limiter (probes previously received 429/400 under load); streaming requests with routing errors now return the proper HTTP status (422 for unknown models) instead of a 200 SSE error event.
+- Change: Provider error details are logged server-side and no longer forwarded to clients; response cache keys now include policy and registry versions so cached routes invalidate after registry updates; `metadata` is bounded to 64 keys of 4096 characters.
+- Impact: Production deployments can authenticate callers, interactive requests honor their timeout, orchestrators see stable probe responses, and upstream failure details stay internal.
+- Files or subsystems: HTTP API, execution, routing, caching, configuration, tests.
+- Validation: 44 automated tests (6 new regression tests), TypeScript lint, and manual verification of the deadline (1370ms to 154ms) and auth rejection (401) repro cases.
+- Known limitations and follow-up: The deadline applies to non-streaming requests; streaming has no total-duration bound by design. `COSMY_API_KEY` is optional and provides single shared-key auth only; per-tenant credentials and OAuth remain follow-up work.

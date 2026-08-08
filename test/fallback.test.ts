@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderError } from '../src/domain/errors.js';
+import { ProviderError, RequestCancelledError } from '../src/domain/errors.js';
 import { RequestExecutor } from '../src/execution/executor.js';
 import { InMemoryMetrics } from '../src/observability/metrics.js';
 import { InMemoryModelRegistry } from '../src/registry/memory-registry.js';
@@ -62,6 +62,27 @@ describe('fallback execution and metrics', () => {
     const result = await executor.execute({ requestId: 'req_open_4', route: router.decide('req_open_4', request), request, signal: new AbortController().signal });
     expect(result.provider).toBe('second');
     expect(result.output).toBe('fallback');
+  });
+
+  it('bounds total request wall time with an overall deadline', async () => {
+    const first = { ...defaultModels[0]!, id: 'first', provider: 'first' };
+    const second = { ...defaultModels[1]!, id: 'second', provider: 'second' };
+    const registry = new InMemoryModelRegistry([first, second]);
+    const route = new DeterministicRouter(registry).decide('req_deadline', { messages: [{ role: 'user', content: 'hello' }] });
+    const slowFailure = (input: import('../src/ports/provider.js').ProviderRequest): Promise<never> => new Promise((_resolve, reject) => {
+      const timer = setTimeout(() => reject(new ProviderError('slow outage', true)), 400);
+      input.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new RequestCancelledError()); }, { once: true });
+    });
+    const providers: ProviderAdapter[] = [
+      { name: 'first', listModels: () => [first], complete: slowFailure, stream: async function* () { throw new ProviderError('x', true); } },
+      { name: 'second', listModels: () => [second], complete: slowFailure, stream: async function* () { throw new ProviderError('x', true); } },
+    ];
+    const resilient = providers.map((provider) => new ResilientProvider(provider, { maxRetries: 2, timeoutMs: 300, baseDelayMs: 0 }));
+    const executor = new RequestExecutor(resilient, new InMemoryUsageLedger(), new InMemoryHealthStore(), undefined, 150);
+    const request = { messages: [{ role: 'user' as const, content: 'hello' }] };
+    const started = Date.now();
+    await expect(executor.execute({ requestId: 'req_deadline', route, request, signal: new AbortController().signal })).rejects.toThrow('cancelled');
+    expect(Date.now() - started).toBeLessThan(300);
   });
 
   it('records a completed stream as success and reconciles the estimate when usage is missing', async () => {

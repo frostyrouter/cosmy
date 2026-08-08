@@ -56,7 +56,7 @@ export const responseRequestJsonSchema = {
       },
       required: ['type'],
     },
-    metadata: { type: 'object', additionalProperties: { type: 'string' } },
+    metadata: { type: 'object', maxProperties: 64, additionalProperties: { type: 'string', maxLength: 4_096 } },
     policy: policySchema,
   },
   required: ['messages'],
