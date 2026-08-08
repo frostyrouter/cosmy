@@ -12,6 +12,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev && addgroup -S router && adduser -S router -G router
 COPY --from=build /app/dist ./dist
+COPY migrations ./migrations
 USER router
 EXPOSE 8080
 CMD ["node", "dist/src/server.js"]
