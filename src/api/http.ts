@@ -1,5 +1,5 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { responseRequestSchema } from './schemas.js';
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { responseRequestJsonSchema, responseResultJsonSchema } from './json-schemas.js';
 import { RouterError } from '../domain/errors.js';
 import type { ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
@@ -14,13 +14,18 @@ function writeSse(reply: FastifyReply, event: string, data: unknown): void {
 }
 
 export function registerRoutes(app: FastifyInstance, service: RouterService): void {
+  app.setErrorHandler((error: FastifyError, _request, reply) => {
+    if (error.validation) {
+      return reply.code(400).send({ error: { code: 'invalid_request', message: error.message } });
+    }
+    return reply.code(500).send({ error: { code: 'internal_error', message: 'An unexpected error occurred' } });
+  });
+
   app.get('/healthz', async () => ({ status: 'ok' }));
   app.get('/readyz', async () => ({ status: 'ready' }));
 
-  app.post('/v1/responses', async (request: FastifyRequest, reply: FastifyReply) => {
-    const parsed = responseRequestSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: { code: 'invalid_request', message: parsed.error.message } });
-    const input = parsed.data as unknown as ResponseRequest;
+  app.post('/v1/responses', { schema: { body: responseRequestJsonSchema, response: { 200: responseResultJsonSchema } } }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const input = request.body as unknown as ResponseRequest;
     const controller = new AbortController();
     reply.raw.on('close', () => controller.abort());
     try {
