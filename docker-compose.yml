@@ -9,4 +9,5 @@ services:
       ROUTER_ENV: production
       HOST: 0.0.0.0
       PORT: 8080
+      CACHE_MODE: memory
     restart: unless-stopped
