@@ -38,8 +38,9 @@ function attemptSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortS
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(new RequestCancelledError());
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); reject(new RequestCancelledError()); }, { once: true });
+    const onAbort = () => { clearTimeout(timer); reject(new RequestCancelledError()); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 

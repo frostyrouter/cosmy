@@ -54,7 +54,7 @@ function cost(model: ModelConfiguration, features: RequestFeatures): number {
   return (features.inputTokens * model.pricing.inputPerMillionUsd + features.requestedOutputTokens * model.pricing.outputPerMillionUsd) / 1_000_000;
 }
 
-function distance(a: number, b: number): number { return 1 - Math.abs(a - b); }
+function distance(a: number, b: number): number { return clamp(1 - Math.abs(a - b)); }
 
 export function rankCandidates(
   models: readonly ModelConfiguration[], features: RequestFeatures, hints: PolicyHints = {}, policy = defaultPolicy,

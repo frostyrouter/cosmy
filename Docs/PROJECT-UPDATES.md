@@ -38,3 +38,13 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files or subsystems: HTTP API, execution, routing, caching, configuration, tests.
 - Validation: 44 automated tests (6 new regression tests), TypeScript lint, and manual verification of the deadline (1370ms to 154ms) and auth rejection (401) repro cases.
 - Known limitations and follow-up: The deadline applies to non-streaming requests; streaming has no total-duration bound by design. `COSMY_API_KEY` is optional and provides single shared-key auth only; per-tenant credentials and OAuth remain follow-up work.
+
+## 2026-08-09 - Accounting robustness, cache bounds, and hygiene fixes
+
+- Change: Usage reconciliation is now best-effort with one retry; a usage-store failure no longer turns a successful provider response into a failed request, no longer marks a healthy model as failed, and no longer masks the original provider error on failure paths.
+- Change: The in-memory response cache now evicts the oldest entry when it reaches 10,000 entries, so unread expired entries cannot grow memory without bound.
+- Change: API-key probe exemption matches the registered route (query-string safe); backoff `wait` removes its abort listener when it resolves; coordinate distance scoring is clamped to [0,1]; CI now runs on `optimise/**` branches; macOS `.DS_Store` files are ignored.
+- Impact: Transient database hiccups during cost accounting no longer fail requests or poison health; cache memory is bounded; health probes with query strings stay unauthenticated.
+- Files or subsystems: Execution, persistence cache, HTTP API, routing policy, resilience, CI, tests.
+- Validation: 47 automated tests (3 new regression tests), TypeScript lint, production build, live HTTP smoke (stream abort, 50 concurrent requests, server restart), and `npm start` smoke test.
+- Known limitations and follow-up: Postgres-backed budget enforcement and per-tenant auth remain open; reconciliation failure is retried once then released as best-effort, which under persistent store outages can leave a reservation un-reconciled.

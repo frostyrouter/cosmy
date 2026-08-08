@@ -39,7 +39,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
   if (config.apiKey) {
     app.addHook('preHandler', async (request, reply) => {
-      if (request.url === '/healthz' || request.url === '/readyz') return;
+      if (request.routeOptions.url === '/healthz' || request.routeOptions.url === '/readyz') return;
       if (request.headers.authorization !== `Bearer ${config.apiKey}`) {
         return reply.code(401).send({ error: { code: 'authentication_error', message: 'Missing or invalid API key' } });
       }
