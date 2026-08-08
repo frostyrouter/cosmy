@@ -18,6 +18,9 @@ import type { HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js'
 import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
 import { PostgresReservationRepository } from './persistence/sql-adapters.js';
+import { InMemoryResponseCache } from './persistence/memory-cache.js';
+import { RedisResponseCache } from './persistence/redis-adapter.js';
+import { createRedisConnection, type RedisConnection } from './persistence/redis.js';
 
 export interface AppDependencies {
   registry?: ModelRegistry;
@@ -25,6 +28,7 @@ export interface AppDependencies {
   health?: HealthStore;
   providers?: readonly ProviderAdapter[];
   metrics?: MetricsSink;
+  cache?: import('./persistence/contracts.js').ResponseCache;
 }
 
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
@@ -47,11 +51,21 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     app.addHook('onClose', async () => { await postgres?.close(); });
   }
   usage ??= new InMemoryUsageLedger();
+  let redis: RedisConnection | undefined;
+  let cache = dependencies.cache;
+  if (!cache && config.cacheMode === 'redis') {
+    if (!config.redisUrl) throw new Error('REDIS_URL is required when CACHE_MODE=redis');
+    redis = await createRedisConnection(config.redisUrl);
+    cache = new RedisResponseCache(redis);
+    app.addHook('onClose', async () => { await redis?.close(); });
+  } else if (!cache && config.cacheMode === 'memory') {
+    cache = new InMemoryResponseCache();
+  }
   const health = dependencies.health ?? new InMemoryHealthStore();
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
   const router = new DeterministicRouter(registry);
   const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
   const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics);
-  registerRoutes(app, new RouterService(router, executor));
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds));
   return app;
 }
