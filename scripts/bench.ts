@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { Session } from 'node:inspector/promises';
 import { buildApp } from '../src/app.js';
 
 const TOTAL = Number(process.env.BENCH_TOTAL ?? 20_000);
@@ -34,6 +35,14 @@ const latencies: number[] = [];
 const errors: number[] = [];
 const started = performance.now();
 
+let profiler: Session | undefined;
+if (process.env.BENCH_PROFILE) {
+  profiler = new Session();
+  profiler.connect();
+  await profiler.post('Profiler.enable');
+  await profiler.post('Profiler.start', { samplingInterval: 100 });
+}
+
 let next = 0;
 async function worker(): Promise<void> {
   while (true) {
@@ -52,6 +61,12 @@ async function worker(): Promise<void> {
 
 await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 const elapsedMs = performance.now() - started;
+
+if (profiler) {
+  const { profile } = await profiler.post('Profiler.stop');
+  await import('node:fs/promises').then((fs) => fs.writeFile(process.env.BENCH_PROFILE, JSON.stringify(profile)));
+  profiler.disconnect();
+}
 latencies.sort((a, b) => a - b);
 
 console.log(JSON.stringify({
