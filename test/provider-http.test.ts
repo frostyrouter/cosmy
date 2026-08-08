@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OpenAIProvider } from '../src/providers/openai.js';
+import { AnthropicProvider } from '../src/providers/anthropic.js';
+import { GeminiProvider } from '../src/providers/gemini.js';
 import type { ModelConfiguration } from '../src/domain/types.js';
 
 const model: ModelConfiguration = {
@@ -30,5 +32,32 @@ describe('OpenAI provider adapter', () => {
     expect(chunks.map((chunk) => chunk.delta).join('')).toBe('hello');
     expect(chunks.at(-1)?.done).toBe(true);
     expect(chunks.at(-1)?.usage?.totalTokens).toBe(3);
+  });
+});
+
+describe('multi-provider normalization', () => {
+  it('normalizes an Anthropic Messages response and separates system input', async () => {
+    const anthropicModel = { ...model, id: 'anthropic-test', provider: 'anthropic', model: 'claude-test' };
+    const provider = new AnthropicProvider({ apiKey: 'test', http: { request: async (_url, init) => {
+      expect(init.headers).toMatchObject({ 'x-api-key': 'test', 'anthropic-version': '2023-06-01' });
+      expect(JSON.parse(String(init.body))).toMatchObject({ model: 'claude-test', system: 'Be concise', messages: [{ role: 'user', content: 'hi' }] });
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: 'hello' }], usage: { input_tokens: 4, output_tokens: 2 }, stop_reason: 'end_turn' }), { status: 200 });
+    } } }, [anthropicModel]);
+    const result = await provider.complete({ request: { messages: [{ role: 'system', content: 'Be concise' }, { role: 'user', content: 'hi' }] }, model: anthropicModel, signal: new AbortController().signal });
+    expect(result.output).toBe('hello');
+    expect(result.usage.totalTokens).toBe(6);
+  });
+
+  it('normalizes a Gemini Generate Content response', async () => {
+    const geminiModel = { ...model, id: 'gemini-test', provider: 'gemini', model: 'gemini-test' };
+    const provider = new GeminiProvider({ apiKey: 'test', http: { request: async (url, init) => {
+      expect(url).toContain('/models/gemini-test:generateContent');
+      expect(url).toContain('key=test');
+      expect(JSON.parse(String(init.body))).toMatchObject({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'hello' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2 } }), { status: 200 });
+    } } }, [geminiModel]);
+    const result = await provider.complete({ request: { messages: [{ role: 'user', content: 'hi' }] }, model: geminiModel, signal: new AbortController().signal });
+    expect(result.output).toBe('hello');
+    expect(result.usage.totalTokens).toBe(5);
   });
 });
