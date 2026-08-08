@@ -28,23 +28,53 @@ export interface MetricsSnapshot {
 }
 
 export class InMemoryMetrics implements MetricsSink {
-  private readonly values: RequestMetric[] = [];
+  private requests = 0;
+  private successes = 0;
+  private errors = 0;
+  private cancellations = 0;
+  private fallbacks = 0;
+  private inputTokens = 0;
+  private outputTokens = 0;
+  private totalCostUsd = 0;
+  private latencyTotalMs = 0;
+  private readonly latencies: number[] = new Array(2_048);
+  private latencyCount = 0;
+  private latencyIndex = 0;
 
-  record(metric: RequestMetric): void { this.values.push(metric); }
+  record(metric: RequestMetric): void {
+    this.requests += 1;
+    if (metric.status === 'success') this.successes += 1;
+    else if (metric.status === 'cancelled') this.cancellations += 1;
+    else this.errors += 1;
+    if (metric.fallbackIndex > 0) this.fallbacks += 1;
+    if (metric.usage) {
+      this.inputTokens += metric.usage.inputTokens;
+      this.outputTokens += metric.usage.outputTokens;
+      this.totalCostUsd += metric.usage.estimatedCostUsd;
+    }
+    this.latencyTotalMs += metric.latencyMs;
+    this.latencies[this.latencyIndex] = metric.latencyMs;
+    this.latencyIndex = (this.latencyIndex + 1) % this.latencies.length;
+    this.latencyCount = Math.min(this.latencyCount + 1, this.latencies.length);
+  }
 
   snapshot(): MetricsSnapshot {
-    const latencies = this.values.map((metric) => metric.latencyMs).sort((a, b) => a - b);
-    const usage = this.values.reduce((total, metric) => ({ input: total.input + (metric.usage?.inputTokens ?? 0), output: total.output + (metric.usage?.outputTokens ?? 0), cost: total.cost + (metric.usage?.estimatedCostUsd ?? 0) }), { input: 0, output: 0, cost: 0 });
+    const count = this.latencyCount;
+    const buffered = this.latencies.slice(0, count).sort((a, b) => a - b);
     return {
-      requests: this.values.length,
-      successes: this.values.filter((metric) => metric.status === 'success').length,
-      errors: this.values.filter((metric) => metric.status === 'error').length,
-      cancellations: this.values.filter((metric) => metric.status === 'cancelled').length,
-      fallbacks: this.values.filter((metric) => metric.fallbackIndex > 0).length,
-      inputTokens: usage.input,
-      outputTokens: usage.output,
-      totalCostUsd: usage.cost,
-      latencyMs: { count: latencies.length, total: latencies.reduce((sum, value) => sum + value, 0), p95: latencies.length ? latencies[Math.min(latencies.length - 1, Math.ceil(latencies.length * 0.95) - 1)]! : 0 },
+      requests: this.requests,
+      successes: this.successes,
+      errors: this.errors,
+      cancellations: this.cancellations,
+      fallbacks: this.fallbacks,
+      inputTokens: this.inputTokens,
+      outputTokens: this.outputTokens,
+      totalCostUsd: this.totalCostUsd,
+      latencyMs: {
+        count,
+        total: this.latencyTotalMs,
+        p95: count ? buffered[Math.min(count - 1, Math.ceil(count * 0.95) - 1)]! : 0,
+      },
     };
   }
 }
