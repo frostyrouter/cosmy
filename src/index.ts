@@ -7,3 +7,5 @@ export * from './routing/router.js';
 export * from './registry/default-models.js';
 export * from './registry/memory-registry.js';
 export * from './providers/simulator.js';
+export * from './providers/configured.js';
+export * from './execution/resilience.js';

@@ -7,7 +7,7 @@ describe('HTTP API', () => {
   afterEach(async () => { await app?.close(); app = undefined; });
 
   it('returns a normalized completion with routing and usage metadata', async () => {
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' });
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'Rewrite this email politely' }] } });
     expect(response.statusCode).toBe(200);
     const body = response.json();
@@ -19,14 +19,14 @@ describe('HTTP API', () => {
   });
 
   it('rejects unknown request fields and invalid messages', async () => {
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' });
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [], unexpected: true } });
     expect(response.statusCode).toBe(400);
     expect(response.json().error.code).toBe('invalid_request');
   });
 
   it('serves stream chunks as SSE events', async () => {
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' });
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'hello world' }] } });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/event-stream');
