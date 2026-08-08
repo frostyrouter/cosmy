@@ -13,3 +13,5 @@ export * from './observability/metrics.js';
 export * from './ports/stores.js';
 export * from './evaluation/harness.js';
 export * from './evaluation/default-cases.js';
+export * from './persistence/contracts.js';
+export * from './persistence/memory-cache.js';
