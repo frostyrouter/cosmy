@@ -13,16 +13,6 @@ services:
       timeout: 3s
       retries: 20
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "56379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-
   router:
     build: .
     ports:
@@ -35,11 +25,6 @@ services:
       PROVIDER_MAX_RETRIES: 0
       PERSISTENCE_MODE: postgres
       DATABASE_URL: postgresql://cosmy:cosmy@postgres:5432/cosmy
-      CACHE_MODE: redis
-      REDIS_URL: redis://redis:6379
-      RESPONSE_CACHE_TTL_SECONDS: 60
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy

@@ -45,7 +45,7 @@ Recommended for early production when expected load is moderate and constraints 
 
 ## Option C: fully self-hosted
 
-Deploy containers, PostgreSQL-compatible storage, Redis-compatible cache, object storage, event streaming, and telemetry in customer infrastructure.
+Deploy containers, PostgreSQL-compatible storage, object storage, event streaming, and telemetry in customer infrastructure.
 
 Advantages:
 
@@ -84,12 +84,12 @@ This is the preferred long-term enterprise architecture.
 | Capability | Managed option | Portable option |
 |---|---|---|
 | Transactional data | Cloud relational DB | PostgreSQL |
-| Cache/rate limits | Managed Redis | Redis-compatible cluster |
+| Cache/rate limits | Managed platform cache | Portable cache interface |
 | Object snapshots | Cloud object store | S3-compatible storage |
 | Event streaming | Managed stream | Kafka-compatible system |
 | Secrets | Cloud secret manager | Vault-compatible system |
 | Metrics | Managed monitoring | Prometheus-compatible |
-| Traces | Managed tracing | OpenTelemetry backend |
+| Traces | Managed tracing | Portable tracing interface |
 | Logs | Managed logging | Structured log store |
 
 Interfaces should preserve semantics, not promise effortless vendor swaps.
@@ -150,6 +150,6 @@ Developers should not require real provider spend for unit and contract tests.
 
 ## Recommendation
 
-Begin with a modular monolith for control-plane APIs plus independently scalable router workers and adapter modules. Use PostgreSQL, Redis-compatible caching, object storage, and OpenTelemetry. Split services only where scaling, security, ownership, or failure isolation justifies the operational cost.
+Begin with a modular monolith for control-plane APIs plus independently scalable router workers and adapter modules. Use PostgreSQL, object storage, and vendor-neutral observability contracts. Add distributed caching or tracing only when measured load and operational requirements justify them. Split services only where scaling, security, ownership, or failure isolation justifies the operational cost.
 
 Avoid premature microservices. The production design defines boundaries now so extraction later is controlled.
