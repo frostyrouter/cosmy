@@ -17,8 +17,10 @@ export async function readJson(response: Response): Promise<Record<string, unkno
   let parsed: unknown;
   try { parsed = text ? JSON.parse(text) : {}; } catch { throw new ProviderError(`Provider returned invalid JSON (${response.status})`, response.status >= 500); }
   if (!response.ok) {
-    const message = typeof parsed === 'object' && parsed !== null && 'error' in parsed ? String((parsed as { error: unknown }).error) : `HTTP ${response.status}`;
-    throw new ProviderError(message, response.status === 408 || response.status === 429 || response.status >= 500);
+    let message: unknown = parsed;
+    if (typeof parsed === 'object' && parsed !== null && 'error' in parsed) message = (parsed as { error: unknown }).error;
+    if (typeof message === 'object' && message !== null && 'message' in message) message = (message as { message: unknown }).message;
+    throw new ProviderError(typeof message === 'string' && message ? message : `HTTP ${response.status}`, response.status === 408 || response.status === 429 || response.status >= 500);
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new ProviderError('Provider returned a non-object response', false);
   return parsed as Record<string, unknown>;
@@ -34,6 +36,13 @@ export async function* readSse(response: Response, signal: AbortSignal): AsyncIt
   const decoder = new TextDecoder();
   let buffer = '';
   let event: string | undefined;
+  const dispatch = function* (line: string): Iterable<{ event?: string; data: string }> {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) {
+      yield event === undefined ? { data: line.slice(5).trim() } : { event, data: line.slice(5).trim() };
+      event = undefined;
+    } else if (line === '') event = undefined;
+  };
   try {
     while (true) {
       if (signal.aborted) throw new RequestCancelledError();
@@ -41,15 +50,10 @@ export async function* readSse(response: Response, signal: AbortSignal): AsyncIt
       buffer += decoder.decode(next.value, { stream: !next.done });
       const lines = buffer.split(/\r?\n/u);
       buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (line.startsWith('event:')) event = line.slice(6).trim();
-        else if (line.startsWith('data:')) {
-          yield event === undefined ? { data: line.slice(5).trim() } : { event, data: line.slice(5).trim() };
-          event = undefined;
-        } else if (line === '') event = undefined;
-      }
+      for (const line of lines) yield* dispatch(line);
       if (next.done) break;
     }
+    if (buffer) yield* dispatch(buffer);
   } finally { reader.releaseLock(); }
 }
 

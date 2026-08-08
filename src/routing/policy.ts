@@ -38,10 +38,13 @@ export function filterEligible(
     if (features.hasTools && !model.capabilities.includes('tools')) { reject(rejected, model, 'tools_unsupported'); continue; }
     if (features.needsStreaming && !model.capabilities.includes('streaming')) { reject(rejected, model, 'streaming_unsupported'); continue; }
     if (features.needsStructuredOutput && !model.capabilities.includes('structured-output')) { reject(rejected, model, 'structured_output_unsupported'); continue; }
+    if (hints.requireCapabilities && hints.requireCapabilities.some((capability) => !model.capabilities.includes(capability))) { reject(rejected, model, 'required_capability_missing'); continue; }
     if (features.modalities.some((modality) => !model.modalities.includes(modality))) { reject(rejected, model, 'modality_unsupported'); continue; }
     if (!model.allowedDataClasses.includes(features.dataClass)) { reject(rejected, model, 'data_class_forbidden'); continue; }
     if (hints.region && !model.regions.includes('global') && !model.regions.includes(hints.region)) { reject(rejected, model, 'region_unavailable'); continue; }
     if (hints.minQuality !== undefined && model.coordinates.quality < hints.minQuality) { reject(rejected, model, 'quality_floor'); continue; }
+    if (hints.maxCostUsd !== undefined && cost(model, features) > hints.maxCostUsd) { reject(rejected, model, 'max_cost_exceeded'); continue; }
+    if (hints.maxLatencyMs !== undefined && model.health.latencyP95Ms > hints.maxLatencyMs) { reject(rejected, model, 'max_latency_exceeded'); continue; }
     eligible.push(model);
   }
   return { eligible, rejected };

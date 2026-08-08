@@ -86,7 +86,7 @@ export class RequestExecutor {
       return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
       const latencyMs = performance.now() - started;
-      this.health.markFailure(route.selected.model.id);
+      if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       await this.usage.reconcile(reservation, 0);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs, fallbackIndex });
       throw error;
@@ -104,10 +104,21 @@ export class RequestExecutor {
     try {
       for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal })) {
         yield { ...chunk, requestId };
-        if (chunk.done && chunk.usage) { const latencyMs = performance.now() - started; this.health.markSuccess(route.selected.model.id, latencyMs); actualCostUsd = chunk.usage.estimatedCostUsd; completed = true; this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: chunk.usage, fallbackIndex }); }
+        if (chunk.done) {
+          const latencyMs = performance.now() - started;
+          this.health.markSuccess(route.selected.model.id, latencyMs);
+          completed = true;
+          if (chunk.usage) {
+            actualCostUsd = chunk.usage.estimatedCostUsd;
+            this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: chunk.usage, fallbackIndex });
+          } else {
+            actualCostUsd = reservation.estimatedCostUsd;
+            this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, fallbackIndex });
+          }
+        }
       }
     } catch (error) {
-      this.health.markFailure(route.selected.model.id);
+      if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
       throw error;
     } finally { await this.usage.reconcile(reservation, completed ? actualCostUsd : 0); }
@@ -116,8 +127,9 @@ export class RequestExecutor {
 
 export function abortAfter(signal: AbortSignal, timeoutMs: number): AbortController {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  signal.addEventListener('abort', () => { clearTimeout(timer); controller.abort(); }, { once: true });
+  const onParentAbort = () => { clearTimeout(timer); controller.abort(); };
+  const timer = setTimeout(() => { signal.removeEventListener('abort', onParentAbort); controller.abort(); }, timeoutMs);
+  signal.addEventListener('abort', onParentAbort, { once: true });
   controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
   return controller;
 }

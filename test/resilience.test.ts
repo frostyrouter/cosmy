@@ -22,4 +22,17 @@ describe('provider resilience', () => {
     await expect(new ResilientProvider(provider, { maxRetries: 3, timeoutMs: 1_000, baseDelayMs: 0 }).complete(request)).rejects.toThrow('bad request');
     expect(calls).toBe(1);
   });
+
+  it('applies the attempt timeout only until the first streamed chunk', async () => {
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const provider: ProviderAdapter = { name: 'simulator', listModels: () => [model], complete: async () => ({ output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }), stream: async function* () {
+      yield { requestId: 'req_stream_timeout', index: 0, delta: 'first', done: false };
+      await delay(120);
+      yield { requestId: 'req_stream_timeout', index: 1, delta: ' second', done: false };
+    } };
+    const resilient = new ResilientProvider(provider, { maxRetries: 0, timeoutMs: 50, baseDelayMs: 0 });
+    const chunks: string[] = [];
+    for await (const chunk of resilient.stream({ request: { requestId: 'req_stream_timeout', messages: [{ role: 'user', content: 'hi' }] }, model, signal: new AbortController().signal })) chunks.push(chunk.delta);
+    expect(chunks).toEqual(['first', ' second']);
+  });
 });

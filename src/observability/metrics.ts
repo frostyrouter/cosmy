@@ -46,7 +46,7 @@ export class InMemoryMetrics implements MetricsSink {
     if (metric.status === 'success') this.successes += 1;
     else if (metric.status === 'cancelled') this.cancellations += 1;
     else this.errors += 1;
-    if (metric.fallbackIndex > 0) this.fallbacks += 1;
+    if (metric.fallbackIndex === 1) this.fallbacks += 1;
     if (metric.usage) {
       this.inputTokens += metric.usage.inputTokens;
       this.outputTokens += metric.usage.outputTokens;

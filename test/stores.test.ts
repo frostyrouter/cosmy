@@ -11,4 +11,12 @@ describe('usage ledger', () => {
     expect(ledger.reservedFor('acme')).toBe(0);
     await expect(ledger.reserve({ tenantId: 'acme', estimatedCostUsd: 0.005 })).resolves.toBeTruthy();
   });
+
+  it('applies the wildcard budget to tenants without an explicit limit', async () => {
+    const ledger = new InMemoryUsageLedger({ '*': 0.01 });
+    const reservation = await ledger.reserve({ tenantId: 'other-tenant', estimatedCostUsd: 0.006 });
+    await expect(ledger.reserve({ tenantId: 'other-tenant', estimatedCostUsd: 0.005 })).rejects.toThrow('budget');
+    await ledger.reconcile(reservation, 0.004);
+    await expect(ledger.reserve({ tenantId: 'other-tenant', estimatedCostUsd: 0.005 })).resolves.toBeTruthy();
+  });
 });

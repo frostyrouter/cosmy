@@ -32,7 +32,7 @@ export interface AppDependencies {
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: { level: config.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
-    try { done(null, JSON.parse(String(body))); } catch { done(new Error('Invalid JSON body')); }
+    try { done(null, JSON.parse(String(body))); } catch { done(Object.assign(new Error('Invalid JSON body'), { statusCode: 400 })); }
   });
   await app.register(cors, { origin: false });
   const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
@@ -52,7 +52,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     }
     app.addHook('onClose', async () => { await postgres?.close(); });
   }
-  usage ??= new InMemoryUsageLedger();
+  usage ??= new InMemoryUsageLedger(config.tenantBudgetUsd !== undefined ? { '*': config.tenantBudgetUsd } : {});
   let cache = dependencies.cache;
   if (!cache && config.cacheMode === 'memory') {
     cache = new InMemoryResponseCache();
@@ -62,6 +62,12 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const router = new DeterministicRouter(registry);
   const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
   const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics);
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds));
+  const db = postgres;
+  const readyCheck = db
+    ? async (): Promise<boolean> => {
+        try { await db.query('SELECT 1'); return true; } catch { return false; }
+      }
+    : undefined;
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds), readyCheck);
   return app;
 }

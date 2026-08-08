@@ -33,6 +33,23 @@ describe('OpenAI provider adapter', () => {
     expect(chunks.at(-1)?.done).toBe(true);
     expect(chunks.at(-1)?.usage?.totalTokens).toBe(3);
   });
+
+  it('emits a trailing SSE data line without a final newline', async () => {
+    const stream = 'event: response.output_text.delta\ndata: {"delta":"tail"}';
+    const provider = new OpenAIProvider({ apiKey: 'test', http: { request: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(stream)); controller.close(); } }), { status: 200 }) } }, [model]);
+    const chunks = [];
+    for await (const chunk of provider.stream({ request: { requestId: 'req_2', messages: [{ role: 'user', content: 'hi' }] }, model, signal: new AbortController().signal })) chunks.push(chunk);
+    expect(chunks.map((chunk) => chunk.delta).join('')).toBe('tail');
+  });
+
+  it('includes the required name and a non-empty schema for json-schema output', async () => {
+    let captured: Record<string, unknown>;
+    const provider = new OpenAIProvider({ apiKey: 'test', http: { request: async (_url, init) => { captured = JSON.parse(String(init.body)); return new Response(JSON.stringify({ output_text: '{}', usage: { input_tokens: 1, output_tokens: 1 }, status: 'completed' }), { status: 200 }); } } }, [model]);
+    await provider.complete({ request: { messages: [{ role: 'user', content: 'json' }], responseFormat: { type: 'json-schema' } }, model, signal: new AbortController().signal });
+    const format = (captured!.text as Record<string, unknown>).format as Record<string, unknown>;
+    expect(format).toMatchObject({ type: 'json_schema', name: 'response' });
+    expect(format.schema).toMatchObject({ type: 'object' });
+  });
 });
 
 describe('multi-provider normalization', () => {

@@ -1,28 +1,32 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { responseRequestJsonSchema, responseResultJsonSchema } from './json-schemas.js';
-import { RouterError } from '../domain/errors.js';
+import { NoRouteError, RouterError } from '../domain/errors.js';
 import type { ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
 
-function errorBody(error: unknown): { error: { code: string; message: string; requestId?: string } } {
-  if (error instanceof RouterError) return { error: { code: error.code, message: error.message } };
-  return { error: { code: 'internal_error', message: 'An unexpected error occurred' } };
+function errorBody(error: unknown, requestId?: string): { error: { code: string; message: string; requestId?: string; retryable?: boolean; details?: unknown } } {
+  if (error instanceof NoRouteError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable, details: { rejected: error.rejected } } };
+  if (error instanceof RouterError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable } };
+  return { error: { code: 'internal_error', message: 'An unexpected error occurred', ...(requestId ? { requestId } : {}) } };
 }
 
 function writeSse(reply: FastifyReply, event: string, data: unknown): void {
   reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-export function registerRoutes(app: FastifyInstance, service: RouterService): void {
+export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean): void {
   app.setErrorHandler((error: FastifyError, _request, reply) => {
-    if (error.validation) {
+    if (error.validation || (error.statusCode !== undefined && error.statusCode < 500)) {
       return reply.code(400).send({ error: { code: 'invalid_request', message: error.message } });
     }
-    return reply.code(500).send({ error: { code: 'internal_error', message: 'An unexpected error occurred' } });
+    return reply.code(error.statusCode ?? 500).send({ error: { code: 'internal_error', message: 'An unexpected error occurred' } });
   });
 
   app.get('/healthz', async () => ({ status: 'ok' }));
-  app.get('/readyz', async () => ({ status: 'ready' }));
+  app.get('/readyz', async (_request, reply) => {
+    if (readyCheck && !(await readyCheck())) return reply.code(503).send({ status: 'unready' });
+    return { status: 'ready' };
+  });
 
   app.post('/v1/responses', { schema: { body: responseRequestJsonSchema, response: { 200: responseResultJsonSchema } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const input = request.body as unknown as ResponseRequest;
@@ -38,7 +42,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService): vo
         try {
           for await (const chunk of service.stream(input, controller.signal)) writeSse(reply, chunk.done ? 'done' : 'delta', chunk);
         } catch (error) {
-          writeSse(reply, 'error', errorBody(error));
+          writeSse(reply, 'error', errorBody(error, input.requestId));
         } finally {
           reply.raw.end();
         }
@@ -46,7 +50,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService): vo
       }
       return reply.send(await service.complete(input, controller.signal));
     } catch (error) {
-      const normalized = errorBody(error);
+      const normalized = errorBody(error, input.requestId);
       return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
     }
   });

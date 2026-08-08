@@ -52,11 +52,29 @@ describe('HTTP API', () => {
     expect(response.json().error.code).toBe('invalid_request');
   });
 
+  it('returns 400 for malformed JSON bodies instead of 500', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: '{not json', headers: { 'content-type': 'application/json' } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_request');
+  });
+
   it('serves stream chunks as SSE events', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'hello world' }] } });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/event-stream');
     expect(response.body).toContain('event: done');
+  });
+
+  it('reports unready when the readiness check fails', async () => {
+    const { default: Fastify } = await import('fastify');
+    const { registerRoutes } = await import('../src/api/http.js');
+    const service = { complete: async () => { throw new Error('unused'); }, stream: async function* () {} } as unknown as import('../src/service/router-service.js').RouterService;
+    const bare = Fastify({ logger: false });
+    registerRoutes(bare, service, async () => false);
+    const response = await bare.inject({ method: 'GET', url: '/readyz' });
+    expect(response.statusCode).toBe(503);
+    await bare.close();
   });
 });

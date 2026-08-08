@@ -40,4 +40,29 @@ describe('eligibility and ranking', () => {
     expect(decision.selected.model.id).toBe('sim-frontier');
     expect(() => router.decide('req_test', { model: 'missing', messages: [{ role: 'user', content: 'hello' }] })).toThrow(/not registered/u);
   });
+
+  it('rejects candidates that exceed the maximum cost or latency', () => {
+    const features = extractFeatures({ messages: [{ role: 'user', content: 'hello' }] });
+    const byCost = filterEligible(defaultModels, features, { maxCostUsd: 0.001 });
+    expect(byCost.eligible.map((model) => model.id)).toEqual(['sim-small-text']);
+    expect(byCost.rejected.find((item) => item.reason === 'max_cost_exceeded')?.modelId).toBe('sim-balanced');
+    const byLatency = filterEligible(defaultModels, features, { maxLatencyMs: 500 });
+    expect(byLatency.eligible).toHaveLength(0);
+    expect(byLatency.rejected.every((item) => item.reason === 'max_latency_exceeded')).toBe(true);
+  });
+
+  it('enforces required capabilities as hard constraints', () => {
+    const features = extractFeatures({ messages: [{ role: 'user', content: 'hello' }] });
+    const result = filterEligible(defaultModels, features, { requireCapabilities: ['vision'] });
+    expect(result.eligible.map((model) => model.id)).toEqual(['sim-frontier']);
+    expect(result.rejected.find((item) => item.reason === 'required_capability_missing')?.modelId).toBe('sim-small-text');
+  });
+
+  it('does not route to a model over the caller cost cap when it would otherwise win', () => {
+    const router = new DeterministicRouter(new InMemoryModelRegistry(defaultModels));
+    const decision = router.decide('req_cost', { messages: [{ role: 'user', content: 'Rewrite this email professionally with high quality' }], maxOutputTokens: 4000, policy: { maxCostUsd: 0.0015 } });
+    expect(decision.selected.estimatedCostUsd).toBeLessThanOrEqual(0.0015);
+    expect(decision.selected.model.id).toBe('sim-small-text');
+    expect(decision.rejected.find((item) => item.reason === 'max_cost_exceeded')?.modelId).toBe('sim-balanced');
+  });
 });

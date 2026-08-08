@@ -12,7 +12,7 @@ function requestBody(input: ProviderRequest, stream: boolean): Record<string, un
   const body: Record<string, unknown> = { model: input.model.model, input: inputFor(input.request), stream };
   if (input.request.temperature !== undefined) body.temperature = input.request.temperature;
   if (input.request.maxOutputTokens !== undefined) body.max_output_tokens = input.request.maxOutputTokens;
-  if (input.request.responseFormat?.type === 'json-schema') body.text = { format: { type: 'json_schema', schema: input.request.responseFormat.schema ?? {} } };
+  if (input.request.responseFormat?.type === 'json-schema') body.text = { format: { type: 'json_schema', name: 'response', schema: input.request.responseFormat.schema ?? { type: 'object' } } };
   if (input.request.tools?.length) body.tools = input.request.tools.map((tool) => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.inputSchema }));
   return body;
 }
