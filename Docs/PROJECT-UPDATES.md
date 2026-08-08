@@ -17,3 +17,12 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files or subsystems: Provider adapters, execution, routing, HTTP API, persistence, configuration, Docker, CI, evaluation, and tests.
 - Validation: 27 automated tests, TypeScript lint, production build, and PostgreSQL-backed Docker Compose smoke test.
 - Limitations and follow-up: Health snapshots and registry publication remain in-memory at runtime; production provider credentials and deployment secrets must be supplied through the environment.
+
+## 2026-08-08 - FastAPI runtime and latency optimization
+
+- Change: Added the Python 3.12 FastAPI runtime with equivalent routing, provider execution, fallback, SSE, budget reconciliation, PostgreSQL startup, and in-memory caching boundaries.
+- Change: Added direct Pydantic Core JSON validation, one-pass ORJSON serialization, shared provider connection pools, cache-first routing, Uvicorn uvloop/httptools deployment, Python CI, and repeatable latency tooling.
+- Impact: The active container and CI runtime now use FastAPI. The comparable cached simulator benchmark improved from 1.223 ms to 1.023 ms average and from 1.479 ms to 1.365 ms p95 on the development host.
+- Files or subsystems: `cosmy`, Python tests, Docker, CI, integration smoke, environment configuration, README, and latency documentation.
+- Validation: Ruff, 14 Python tests, comparable 500-request HTTP benchmark, and PostgreSQL-backed Docker Compose verification.
+- Limitations and follow-up: The TypeScript implementation remains temporarily for parity comparison; remaining evaluation and control-plane tests must be ported before removing it.
