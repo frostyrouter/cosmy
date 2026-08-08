@@ -7,8 +7,14 @@ export interface ModelRegistry {
 }
 
 export interface UsageLedger {
-  reserve(input: { tenantId: string; estimatedCostUsd: number }): Promise<void>;
-  record(input: { tenantId: string; usage: Usage }): Promise<void>;
+  reserve(input: { tenantId: string; estimatedCostUsd: number }): Promise<UsageReservation>;
+  reconcile(reservation: UsageReservation, actualCostUsd: number): Promise<void>;
+}
+
+export interface UsageReservation {
+  id: string;
+  tenantId: string;
+  estimatedCostUsd: number;
 }
 
 export interface HealthStore {

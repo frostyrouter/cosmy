@@ -15,6 +15,7 @@ describe('HTTP API', () => {
     expect(body.output).toContain('Rewritten');
     expect(body.route.selected.model.id).toBeTruthy();
     expect(body.usage.totalTokens).toBeGreaterThan(0);
+    expect(body.usage.totalTokens).toBe(body.usage.inputTokens + body.usage.outputTokens);
   });
 
   it('rejects unknown request fields and invalid messages', async () => {
