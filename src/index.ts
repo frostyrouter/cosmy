@@ -9,3 +9,4 @@ export * from './registry/memory-registry.js';
 export * from './providers/simulator.js';
 export * from './providers/configured.js';
 export * from './execution/resilience.js';
+export * from './observability/metrics.js';

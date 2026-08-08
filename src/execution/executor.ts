@@ -4,6 +4,8 @@ import type { HealthStore, UsageLedger } from '../ports/stores.js';
 import type { ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
 import { providerForModel } from '../providers/simulator.js';
 import { RequestCancelledError } from '../domain/errors.js';
+import { ProviderError } from '../domain/errors.js';
+import type { MetricsSink } from '../observability/metrics.js';
 
 export interface ExecutionOptions {
   requestId: string;
@@ -17,30 +19,69 @@ export class RequestExecutor {
     private readonly providers: readonly ProviderAdapter[],
     private readonly usage: UsageLedger,
     private readonly health: HealthStore,
+    private readonly metrics?: MetricsSink,
   ) {}
 
   async execute(options: ExecutionOptions): Promise<ResponseResult> {
     const { request, route, requestId, signal } = options;
     if (signal.aborted) throw new RequestCancelledError();
+    const candidates = [route.selected, ...route.alternatives];
+    let lastError: unknown;
+    for (const [fallbackIndex, candidate] of candidates.entries()) {
+      const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
+      try {
+        return await this.executeCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex });
+      } catch (error) {
+        lastError = error;
+        if (request.policy?.allowFallback === false || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new ProviderError('All route candidates failed');
+  }
+
+  async *stream(options: ExecutionOptions): AsyncIterable<ResponseChunk> {
+    const { request, route, requestId, signal } = options;
+    if (signal.aborted) throw new RequestCancelledError();
+    const candidates = [route.selected, ...route.alternatives];
+    for (const [fallbackIndex, candidate] of candidates.entries()) {
+      const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
+      let emitted = false;
+      try {
+        for await (const chunk of this.streamCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex })) {
+          emitted = emitted || chunk.delta.length > 0;
+          yield chunk;
+        }
+        return;
+      } catch (error) {
+        if (request.policy?.allowFallback === false || emitted || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+      }
+    }
+  }
+
+  private async executeCandidate(options: ExecutionOptions & { fallbackIndex: number }): Promise<ResponseResult> {
+    const { request, route, requestId, signal, fallbackIndex } = options;
     const provider = providerForModel(this.providers, route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
     try {
       const response = await provider.complete({ request: { ...request, requestId }, model: route.selected.model, signal });
-      this.health.markSuccess(route.selected.model.id, performance.now() - started);
+      const latencyMs = performance.now() - started;
+      this.health.markSuccess(route.selected.model.id, latencyMs);
       await this.usage.reconcile(reservation, response.usage.estimatedCostUsd);
+      this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: response.usage, fallbackIndex });
       return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
+      const latencyMs = performance.now() - started;
       this.health.markFailure(route.selected.model.id);
       await this.usage.reconcile(reservation, 0);
+      this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs, fallbackIndex });
       throw error;
     }
   }
 
-  async *stream(options: ExecutionOptions): AsyncIterable<ResponseChunk> {
-    const { request, route, requestId, signal } = options;
-    if (signal.aborted) throw new RequestCancelledError();
+  private async *streamCandidate(options: ExecutionOptions & { fallbackIndex: number }): AsyncIterable<ResponseChunk> {
+    const { request, route, requestId, signal, fallbackIndex } = options;
     const provider = providerForModel(this.providers, route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
@@ -50,18 +91,13 @@ export class RequestExecutor {
     try {
       for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal })) {
         yield { ...chunk, requestId };
-        if (chunk.done && chunk.usage) {
-          this.health.markSuccess(route.selected.model.id, performance.now() - started);
-          actualCostUsd = chunk.usage.estimatedCostUsd;
-          completed = true;
-        }
+        if (chunk.done && chunk.usage) { const latencyMs = performance.now() - started; this.health.markSuccess(route.selected.model.id, latencyMs); actualCostUsd = chunk.usage.estimatedCostUsd; completed = true; this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: chunk.usage, fallbackIndex }); }
       }
     } catch (error) {
       this.health.markFailure(route.selected.model.id);
+      this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
       throw error;
-    } finally {
-      await this.usage.reconcile(reservation, completed ? actualCostUsd : 0);
-    }
+    } finally { await this.usage.reconcile(reservation, completed ? actualCostUsd : 0); }
   }
 }
 
