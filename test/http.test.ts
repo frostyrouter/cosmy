@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { InMemoryResponseCache } from '../src/persistence/memory-cache.js';
 
 describe('HTTP API', () => {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
@@ -30,6 +31,18 @@ describe('HTTP API', () => {
     });
     expect(response.status).toBe(200);
     expect((await response.json()).status).toBe('completed');
+  });
+
+  it('serves repeated completions from the configured response cache', async () => {
+    const cache = new InMemoryResponseCache();
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, cacheMode: 'memory', responseCacheTtlSeconds: 60 }, { cache });
+    const payload = { messages: [{ role: 'user', content: 'cache this response' }] };
+    const first = await app.inject({ method: 'POST', url: '/v1/responses', payload });
+    const second = await app.inject({ method: 'POST', url: '/v1/responses', payload });
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().output).toBe(first.json().output);
+    expect(second.json().requestId).not.toBe(first.json().requestId);
   });
 
   it('rejects unknown request fields and invalid messages', async () => {

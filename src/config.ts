@@ -7,6 +7,9 @@ export interface AppConfig {
   providerMaxRetries: number;
   persistenceMode?: 'memory' | 'postgres';
   databaseUrl?: string;
+  cacheMode?: 'off' | 'memory' | 'redis';
+  redisUrl?: string;
+  responseCacheTtlSeconds?: number;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -28,5 +31,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     providerMaxRetries: numberEnv(env.PROVIDER_MAX_RETRIES, 2),
     persistenceMode: env.PERSISTENCE_MODE === 'postgres' ? 'postgres' : 'memory',
     ...(env.DATABASE_URL ? { databaseUrl: env.DATABASE_URL } : {}),
+    cacheMode: env.CACHE_MODE === 'redis' ? 'redis' : env.CACHE_MODE === 'memory' ? 'memory' : 'off',
+    ...(env.REDIS_URL ? { redisUrl: env.REDIS_URL } : {}),
+    responseCacheTtlSeconds: numberEnv(env.RESPONSE_CACHE_TTL_SECONDS, 60),
   };
 }
