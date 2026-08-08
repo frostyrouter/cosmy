@@ -22,7 +22,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService): vo
     if (!parsed.success) return reply.code(400).send({ error: { code: 'invalid_request', message: parsed.error.message } });
     const input = parsed.data as unknown as ResponseRequest;
     const controller = new AbortController();
-    request.raw.on('close', () => controller.abort());
+    request.raw.on('aborted', () => controller.abort());
     try {
       if (input.stream) {
         reply.hijack();

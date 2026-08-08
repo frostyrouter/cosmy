@@ -18,6 +18,20 @@ describe('HTTP API', () => {
     expect(body.usage.totalTokens).toBe(body.usage.inputTokens + body.usage.outputTokens);
   });
 
+  it('does not treat a normally completed HTTP request as cancelled', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected a TCP listener');
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello over HTTP' }] }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).status).toBe('completed');
+  });
+
   it('rejects unknown request fields and invalid messages', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [], unexpected: true } });
