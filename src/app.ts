@@ -32,7 +32,8 @@ export interface AppDependencies {
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: { level: config.logLevel } });
   await app.register(cors, { origin: false });
-  await app.register(rateLimit, { max: config.environment === 'production' ? 120 : 1_000, timeWindow: '1 minute' });
+  const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
+  await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
   const registry = dependencies.registry ?? new InMemoryModelRegistry([...defaultModels, ...configuredModelManifests()]);
   let postgres: PostgresSqlClient | undefined;
   let usage = dependencies.usage;

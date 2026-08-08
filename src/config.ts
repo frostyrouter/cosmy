@@ -9,6 +9,7 @@ export interface AppConfig {
   databaseUrl?: string;
   cacheMode?: 'off' | 'memory';
   responseCacheTtlSeconds?: number;
+  rateLimitMax?: number;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -32,5 +33,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.DATABASE_URL ? { databaseUrl: env.DATABASE_URL } : {}),
     cacheMode: env.CACHE_MODE === 'memory' ? 'memory' : 'off',
     responseCacheTtlSeconds: numberEnv(env.RESPONSE_CACHE_TTL_SECONDS, 60),
+    ...(env.RATE_LIMIT_MAX ? { rateLimitMax: numberEnv(env.RATE_LIMIT_MAX, 0) } : {}),
   };
 }
