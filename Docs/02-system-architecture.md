@@ -214,4 +214,4 @@ Transitions are monotonic. `ESCALATING` creates a new attempt under the same req
 
 ## Technology boundaries
 
-The design does not mandate one programming language. The hot path benefits from a memory-safe runtime with strong asynchronous I/O, predictable cancellation, and mature HTTP streaming. TypeScript/Node.js, Go, and Rust are reasonable options. Python is suitable for evaluation and offline analysis; it is not required in the data plane.
+The active data plane uses Python 3.12, FastAPI, Uvicorn, uvloop, and httptools. Provider I/O is asynchronous and uses shared HTTP connection pools. This choice is validated by the reproducible latency measurements in `Docs/21-fastapi-latency.md`; a future runtime change must preserve API behavior and demonstrate a measurable improvement under the same benchmark methodology.
