@@ -21,6 +21,7 @@ export interface VersionedModelRegistry extends ModelRegistry {
 export interface UsageLedger {
   reserve(input: { tenantId: string; estimatedCostUsd: number }): Promise<UsageReservation>;
   reconcile(reservation: UsageReservation, actualCostUsd: number): Promise<void>;
+  heartbeat?(reservation: UsageReservation): Promise<void>;
 }
 
 export interface UsageReservation {

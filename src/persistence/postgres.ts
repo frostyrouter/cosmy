@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { Pool, type PoolClient } from 'pg';
 import type { SqlClient, SqlResult } from './sql-adapters.js';
 
@@ -44,6 +46,33 @@ export async function createPostgresSqlClient(connectionString: string): Promise
   return new PostgresSqlClient(pool);
 }
 
-export async function applyControlPlaneMigration(client: SqlClient, migrationPath = 'migrations/001_control_plane.sql'): Promise<void> {
-  await client.query(await readFile(migrationPath, 'utf8'));
+interface MigrationRow { checksum: string; }
+
+export async function applyControlPlaneMigrations(client: SqlClient, migrationDirectory = 'migrations'): Promise<void> {
+  if (!client.transaction) throw new Error('Managed migrations require a transactional SQL client');
+  const files = (await readdir(migrationDirectory)).filter((file) => /^\d+.*\.sql$/u.test(file)).sort();
+  await client.transaction(async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cosmy:schema-migrations']);
+    await tx.query('CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())');
+    for (const version of files) {
+      const sql = await readFile(join(migrationDirectory, version), 'utf8');
+      const checksum = createHash('sha256').update(sql).digest('hex');
+      const existing = await tx.query<MigrationRow>('SELECT checksum FROM schema_migrations WHERE version = $1', [version]);
+      const applied = existing.rows[0];
+      if (applied) {
+        if (applied.checksum !== checksum) throw new Error(`Applied migration '${version}' checksum does not match the repository`);
+        continue;
+      }
+      await tx.query(sql);
+      await tx.query('INSERT INTO schema_migrations (version, checksum) VALUES ($1, $2)', [version, checksum]);
+    }
+  });
+}
+
+export async function applyControlPlaneMigration(client: SqlClient, migrationPath?: string): Promise<void> {
+  if (migrationPath) {
+    await client.query(await readFile(migrationPath, 'utf8'));
+    return;
+  }
+  await applyControlPlaneMigrations(client);
 }

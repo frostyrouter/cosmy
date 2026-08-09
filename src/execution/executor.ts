@@ -21,6 +21,7 @@ export class RequestExecutor {
     private readonly health: HealthStore,
     private readonly metrics?: MetricsSink,
     private readonly requestTimeoutMs?: number,
+    private readonly reservationHeartbeatMs = 30_000,
   ) {
     this.providerByName = new Map(providers.map((provider) => [provider.name, provider]));
   }
@@ -124,8 +125,29 @@ export class RequestExecutor {
     const started = performance.now();
     let actualCostUsd = 0;
     let completed = false;
+    const leaseController = new AbortController();
+    const onRequestAbort = () => leaseController.abort();
+    if (signal.aborted) leaseController.abort();
+    else signal.addEventListener('abort', onRequestAbort, { once: true });
+    let heartbeatError: RouterError | undefined;
+    let heartbeatRunning = false;
+    let closed = false;
+    const heartbeat = this.usage.heartbeat
+      ? setInterval(() => {
+          if (heartbeatRunning || closed) return;
+          heartbeatRunning = true;
+          void this.renewLease(reservation).catch(() => {
+            if (!closed) {
+              heartbeatError = new RouterError('Unable to renew the active reservation lease', 'reservation_heartbeat_failed', 503, true);
+              leaseController.abort();
+            }
+          }).finally(() => { heartbeatRunning = false; });
+        }, this.reservationHeartbeatMs)
+      : undefined;
+    heartbeat?.unref();
     try {
-      for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal })) {
+      for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal: leaseController.signal })) {
+        if (heartbeatError) throw heartbeatError;
         yield { ...chunk, requestId };
         if (chunk.done) {
           const latencyMs = performance.now() - started;
@@ -140,12 +162,41 @@ export class RequestExecutor {
           }
         }
       }
+      if (heartbeatError) throw heartbeatError;
     } catch (error) {
-      if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
-      this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
-      throw error;
-    } finally { await this.reconcileBestEffort(reservation, completed ? actualCostUsd : 0); }
+      const executionError = heartbeatError ?? error;
+      if (!heartbeatError && !(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
+      this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: executionError instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
+      throw executionError;
+    } finally {
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      signal.removeEventListener('abort', onRequestAbort);
+      await this.reconcileBestEffort(reservation, heartbeatError ? reservation.estimatedCostUsd : completed ? actualCostUsd : 0);
+    }
   }
+
+  private async renewLease(reservation: UsageReservation): Promise<void> {
+    const renew = this.usage.heartbeat?.bind(this.usage);
+    if (!renew) return;
+    let failure: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await settleWithin(renew(reservation), 5_000);
+        return;
+      } catch (error) { failure = error; }
+    }
+    throw failure;
+  }
+}
+
+async function settleWithin<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error('Operation timed out')), timeoutMs);
+    timer.unref();
+  });
+  try { return await Promise.race([operation, timeout]); } finally { if (timer) clearTimeout(timer); }
 }
 
 export interface Deadline { signal: AbortSignal; dispose: () => void; }

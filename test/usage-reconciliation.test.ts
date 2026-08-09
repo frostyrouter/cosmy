@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderError } from '../src/domain/errors.js';
+import { ProviderError, RequestCancelledError } from '../src/domain/errors.js';
 import { defaultModels } from '../src/registry/default-models.js';
 import { InMemoryUsageLedger } from '../src/stores/memory-usage-ledger.js';
 import { InMemoryModelRegistry } from '../src/registry/memory-registry.js';
@@ -51,5 +51,31 @@ describe('usage reconciliation', () => {
     const providers: ProviderAdapter[] = [{ name: 'simulator', listModels: () => defaultModels, complete: async () => { throw new ProviderError('original outage', true); }, stream: async function* () { throw new ProviderError('original outage', true); } }];
     const executor = new RequestExecutor(providers, ledger, new InMemoryHealthStore());
     await expect(executor.execute({ requestId: 'req_reconcile_fail', route, request: { messages: [{ role: 'user', content: 'hello' }] }, signal: new AbortController().signal })).rejects.toThrow('original outage');
+  });
+
+  it('stops a live stream when its reservation lease cannot be renewed', async () => {
+    const registry = new InMemoryModelRegistry(defaultModels);
+    const route = new DeterministicRouter(registry).decide('req_heartbeat', { stream: true, messages: [{ role: 'user', content: 'hello' }] });
+    const reconciliations: number[] = [];
+    const ledger = {
+      reserve: async () => ({ id: 'r3', tenantId: 'default', estimatedCostUsd: 0.001 }),
+      reconcile: async (_reservation, actualCostUsd) => { reconciliations.push(actualCostUsd); },
+      heartbeat: async () => { throw new Error('database unavailable'); },
+    } as import('../src/ports/stores.js').UsageLedger;
+    const provider: ProviderAdapter = {
+      name: 'simulator', listModels: () => defaultModels,
+      complete: async () => { throw new Error('unused'); },
+      stream: async function* ({ signal }) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 100);
+          signal.addEventListener('abort', () => { clearTimeout(timer); reject(new RequestCancelledError()); }, { once: true });
+        });
+        yield { requestId: 'req_heartbeat', index: 0, delta: 'late', done: false };
+      },
+    };
+    const executor = new RequestExecutor([provider], ledger, new InMemoryHealthStore(), undefined, undefined, 5);
+    const consume = async () => { for await (const _chunk of executor.stream({ requestId: 'req_heartbeat', route, request: { stream: true, messages: [{ role: 'user', content: 'hello' }] }, signal: new AbortController().signal })) { /* consume */ } };
+    await expect(consume()).rejects.toMatchObject({ code: 'reservation_heartbeat_failed', statusCode: 503 });
+    expect(reconciliations).toEqual([0.001]);
   });
 });

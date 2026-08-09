@@ -2,6 +2,25 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-09 - Tenant-safe retries and cache boundaries
+
+- Change: Added tenant-scoped idempotency claims for non-streaming responses, with bounded memory storage and durable PostgreSQL replay through migration 003. Duplicate in-flight work is blocked, changed requests cannot reuse a key, and a result-storage outage keeps the claim instead of risking duplicate execution and billing.
+- Change: Response caching now permits only public/internal, zero-temperature, tool-free requests. Confidential, restricted, creative, and tool-using work bypasses cache storage and lookup.
+- Impact: Clients can safely retry ambiguous non-streaming failures across router instances, while sensitive or nondeterministic responses cannot be accidentally reused by the optimization cache.
+- Files: HTTP admission, router service, persistence contracts/adapters, migration 003, configuration, integration CI, tests, and the retry/cache operator guide.
+- Validation: Unit and HTTP concurrency tests, migration coverage, TypeScript lint, production build, and real PostgreSQL/Docker integration.
+- Migration: Deploy migration 003 before using idempotency on PostgreSQL. Configure `IDEMPOTENCY_TTL_SECONDS` to cover the client retry window; default is 24 hours.
+- Follow-up: Administrative audit APIs remain in the next control-plane milestone.
+
+## 2026-08-09 - Reservation crash recovery
+
+- Change: Added renewable reservation leases, streaming heartbeats, startup recovery, and periodic PostgreSQL sweeps using `FOR UPDATE SKIP LOCKED`. Expired work is charged at its reserved estimate and tagged `lease-expiry`.
+- Impact: A router crash or persistent reconciliation failure can no longer reserve tenant capacity forever. Multiple router instances may sweep safely without double settlement.
+- Validation: Unit/configuration tests plus real PostgreSQL lease-expiry, heartbeat, and concurrent accounting integration tests.
+- Operations: Keep `RESERVATION_LEASE_SECONDS` above the longest ordinary non-streaming request; Cosmy enforces request timeout plus 30 seconds as a floor. Alert on lease-expiry reconciliation because it indicates uncertain actual provider cost.
+- Review hardening: Duplicate enabled credential digests now fail startup, sustained streaming-heartbeat failure terminates the stream before lease recovery can settle it, and third-party CI actions are pinned to immutable commits.
+- Follow-up: Add an authenticated correction/audit workflow for operators who later recover authoritative provider usage.
+
 ## 2026-08-08 - Update tracking established
 
 - Change: Added the repository rule requiring implementation updates for every feature or change, with a consolidated entry at least every two merged pull requests.
@@ -58,3 +77,29 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files or subsystems: Execution, resilience, configuration, cache, tests.
 - Validation: 50 automated tests (2 new regression tests), TypeScript lint, live HTTP verification of the 504 timeout path and `RATE_LIMIT_MAX=0`.
 - Known limitations and follow-up: Streaming requests still have no total-duration bound by design; half-open breaker probes are not concurrency-limited.
+
+## 2026-08-09 - Review defect closure
+
+- Change: Tool definitions must now include `inputSchema`, so malformed requests fail locally instead of reaching a provider. The bounded latency window now removes an evicted sample from its running total, keeping count, total, and p95 mathematically consistent.
+- Impact: Provider requests cannot receive structurally incomplete tools, and long-running processes expose correct latency aggregates after the 2,048-sample window wraps.
+- Files: Request JSON schema, in-memory metrics, HTTP and metrics regression tests.
+- Validation: TypeScript lint, focused regression tests, full test suite, and production build.
+- Follow-up: This closes both unresolved P1 findings from PR #6; production metrics export remains part of the observability milestone.
+
+## 2026-08-09 - Tenant-safe API admission
+
+- Change: Added tenant-scoped API credentials configured as SHA-256 digests, scope checks, production fail-closed startup, and credential-derived billing identity. A caller can no longer select another tenant through `policy.tenantId`.
+- Impact: Authentication and billing now share one trusted tenant identity. Existing `COSMY_API_KEY` deployments keep a documented migration path to digested credentials.
+- Files: Security module, configuration, HTTP admission, startup composition, environment example, tests, and tenant security guide.
+- Validation: Authentication/configuration tests, HTTP trust-boundary tests, TypeScript lint, full test suite, and production build.
+- Migration: Configure `COSMY_API_CREDENTIALS` before the next production restart. Use `ALLOW_UNAUTHENTICATED=true` only as an explicit emergency override.
+- Follow-up: Durable key rotation, OAuth/workload identity, and administrative audit events remain control-plane work.
+
+## 2026-08-09 - Atomic PostgreSQL budgets and managed migrations
+
+- Change: Added tenant budget rows, transactional conditional reservations, idempotent reconciliation totals, and a zero-means-unlimited configuration fix. Startup now applies numbered migrations under an advisory lock and rejects checksum drift.
+- Impact: Concurrent router instances cannot overspend a configured PostgreSQL tenant budget through a check-then-insert race. Schema changes are ordered, recorded, and safe to retry.
+- Files: PostgreSQL client and repositories, migration 002, configuration, unit/integration tests, integration CI, and persistence guide.
+- Validation: Mock contract tests, real PostgreSQL concurrent reservation tests, full test suite, build, and Docker Compose smoke.
+- Migration: Existing databases re-run idempotent migration 001 once to establish checksums, then apply migration 002. Never edit a migration after deployment.
+- Follow-up: Add durable reconciliation jobs and budget administration/audit APIs in the control-plane milestone.

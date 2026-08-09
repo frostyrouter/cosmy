@@ -17,7 +17,7 @@ const toolSchema = {
     description: { type: 'string' },
     inputSchema: { type: 'object', additionalProperties: true },
   },
-  required: ['name'],
+  required: ['name', 'inputSchema'],
 } as const;
 
 const policySchema = {

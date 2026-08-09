@@ -3,6 +3,7 @@ import { responseRequestJsonSchema, responseResultJsonSchema } from './json-sche
 import { NoRouteError, ProviderError, RouterError } from '../domain/errors.js';
 import type { ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
+import type { RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
 
 function errorBody(error: unknown, requestId?: string): { error: { code: string; message: string; requestId?: string; retryable?: boolean; details?: unknown } } {
   if (error instanceof NoRouteError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable, details: { rejected: error.rejected } } };
@@ -15,7 +16,31 @@ function writeSse(reply: FastifyReply, event: string, data: unknown): void {
   reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean): void {
+function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined): RequestPrincipal | undefined {
+  if (!authenticator) return undefined;
+  const principal = authenticator.authenticate(authorization);
+  if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401);
+  if (!principal.scopes.includes('responses:create')) throw new RouterError('Credential cannot create responses', 'authorization_error', 403);
+  return principal;
+}
+
+function tenantRequest(input: ResponseRequest, principal: RequestPrincipal | undefined): ResponseRequest {
+  const tenantId = principal?.tenantId ?? 'anonymous';
+  if (input.policy?.tenantId && input.policy.tenantId !== tenantId) {
+    throw new RouterError('Request tenant does not match the authenticated credential', 'authorization_error', 403);
+  }
+  return { ...input, policy: { ...input.policy, tenantId } };
+}
+
+function idempotencyKey(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value) || !/^[A-Za-z0-9._:-]{1,128}$/u.test(value)) {
+    throw new RouterError('Idempotency-Key must contain 1-128 safe characters', 'invalid_request', 400);
+  }
+  return value;
+}
+
+export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator): void {
   app.setErrorHandler((error: FastifyError, _request, reply) => {
     if (error.validation || (error.statusCode !== undefined && error.statusCode < 500)) {
       return reply.code(400).send({ error: { code: 'invalid_request', message: error.message } });
@@ -30,7 +55,17 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
   });
 
   app.post('/v1/responses', { schema: { body: responseRequestJsonSchema, response: { 200: responseResultJsonSchema } } }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const input = request.body as unknown as ResponseRequest;
+    const submitted = request.body as unknown as ResponseRequest;
+    let input: ResponseRequest;
+    let requestKey: string | undefined;
+    try {
+      input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator));
+      requestKey = idempotencyKey(request.headers['idempotency-key']);
+      if (input.stream && requestKey) throw new RouterError('Idempotency-Key is not supported for streaming requests', 'invalid_request', 400);
+    } catch (error) {
+      const normalized = errorBody(error, submitted.requestId);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
     const controller = new AbortController();
     reply.raw.on('close', () => controller.abort());
     try {
@@ -51,7 +86,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
         }
         return;
       }
-      return reply.send(await service.complete(input, controller.signal));
+      return reply.send(await service.complete(input, controller.signal, requestKey));
     } catch (error) {
       request.log.warn({ err: error }, 'request failed');
       const normalized = errorBody(error, input.requestId);

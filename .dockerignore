@@ -1,6 +1,11 @@
 node_modules
 dist
 coverage
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+*.py[cod]
 .git
 .env
 Docs

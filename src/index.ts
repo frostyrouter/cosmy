@@ -15,4 +15,6 @@ export * from './evaluation/harness.js';
 export * from './evaluation/default-cases.js';
 export * from './persistence/contracts.js';
 export * from './persistence/memory-cache.js';
+export * from './persistence/memory-idempotency.js';
 export * from './persistence/sql-adapters.js';
+export * from './security/auth.js';
