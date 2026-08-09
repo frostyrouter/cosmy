@@ -33,6 +33,7 @@ export class StaticApiKeyAuthenticator implements RequestAuthenticator {
       if (!/^[a-f0-9]{64}$/u.test(credential.keySha256)) throw new Error(`Credential '${credential.id}' has an invalid SHA-256 digest`);
       if (!credential.id || !credential.tenantId) throw new Error('Credential id and tenantId are required');
       if (credential.disabled) continue;
+      if (entries.some(([digest]) => digest === credential.keySha256)) throw new Error(`Credential '${credential.id}' has a duplicate SHA-256 digest`);
       entries.push([credential.keySha256, { credentialId: credential.id, tenantId: credential.tenantId, scopes: [...credential.scopes] }]);
     }
     this.byDigest = new Map(entries);

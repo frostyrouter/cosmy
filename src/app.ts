@@ -49,6 +49,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const registry = dependencies.registry ?? new InMemoryModelRegistry([...defaultModels, ...configuredModelManifests()]);
   let postgres: PostgresSqlClient | undefined;
   let reservationRecovery: PostgresReservationRepository | undefined;
+  let reservationHeartbeatMs = 30_000;
   let usage = dependencies.usage;
   if (!usage && config.persistenceMode === 'postgres') {
     if (!config.databaseUrl) throw new Error('DATABASE_URL is required when PERSISTENCE_MODE=postgres');
@@ -56,7 +57,9 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     try {
       await applyControlPlaneMigration(postgres);
       const minimumLeaseSeconds = Math.ceil(config.requestTimeoutMs / 1_000) + 30;
-      reservationRecovery = new PostgresReservationRepository(postgres, config.tenantBudgetUsd, Math.max(config.reservationLeaseSeconds ?? 300, minimumLeaseSeconds));
+      const leaseSeconds = Math.max(config.reservationLeaseSeconds ?? 300, minimumLeaseSeconds);
+      reservationHeartbeatMs = Math.min(30_000, Math.max(1_000, Math.floor(leaseSeconds * 1_000 / 3)));
+      reservationRecovery = new PostgresReservationRepository(postgres, config.tenantBudgetUsd, leaseSeconds);
       usage = reservationRecovery;
     } catch (error) {
       await postgres.close();
@@ -73,7 +76,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
   const router = new DeterministicRouter(registry);
   const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
-  const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics, config.requestTimeoutMs);
+  const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics, config.requestTimeoutMs, reservationHeartbeatMs);
   const db = postgres;
   const readyCheck = db
     ? async (): Promise<boolean> => {

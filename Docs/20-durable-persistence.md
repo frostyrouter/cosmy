@@ -18,7 +18,7 @@ Reconciliation uses one data-modifying CTE. It marks an active reservation recon
 
 ## Crash recovery
 
-Every reservation has a renewable lease. Normal provider completion reconciles actual cost; streaming execution renews its lease every 30 seconds. Startup and the periodic recovery sweep lock expired rows with `SKIP LOCKED`, charge their original estimate conservatively, and release reserved capacity. This favors budget safety over undercounting when a process dies after provider execution but before actual usage is stored.
+Every reservation has a renewable lease. Normal provider completion reconciles actual cost; streaming execution renews its lease at least three times per lease period. A failed renewal is retried with a five-second bound; sustained failure stops the stream with `reservation_heartbeat_failed` and settles the conservative estimate before recovery may touch live work. Startup and the periodic recovery sweep lock expired rows with `SKIP LOCKED`, charge their original estimate conservatively, and release reserved capacity. This favors budget safety over undercounting when a process dies after provider execution but before actual usage is stored.
 
 `RESERVATION_LEASE_SECONDS` defaults to 300 and is automatically raised to at least the request timeout plus 30 seconds. `RECONCILIATION_SWEEP_SECONDS` defaults to 30; zero disables the periodic sweep but startup recovery still runs. Rows record `reconciliation_source` as `runtime` or `lease-expiry` for audit and correction workflows.
 

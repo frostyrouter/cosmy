@@ -18,6 +18,7 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Impact: A router crash or persistent reconciliation failure can no longer reserve tenant capacity forever. Multiple router instances may sweep safely without double settlement.
 - Validation: Unit/configuration tests plus real PostgreSQL lease-expiry, heartbeat, and concurrent accounting integration tests.
 - Operations: Keep `RESERVATION_LEASE_SECONDS` above the longest ordinary non-streaming request; Cosmy enforces request timeout plus 30 seconds as a floor. Alert on lease-expiry reconciliation because it indicates uncertain actual provider cost.
+- Review hardening: Duplicate enabled credential digests now fail startup, sustained streaming-heartbeat failure terminates the stream before lease recovery can settle it, and third-party CI actions are pinned to immutable commits.
 - Follow-up: Add an authenticated correction/audit workflow for operators who later recover authoritative provider usage.
 
 ## 2026-08-08 - Update tracking established

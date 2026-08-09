@@ -10,6 +10,14 @@ describe('tenant authentication', () => {
     expect(authenticator.authenticate(undefined)).toBeUndefined();
   });
 
+  it('rejects duplicate enabled digests instead of changing tenant identity by order', () => {
+    const digest = sha256ApiKey('shared-secret');
+    expect(() => new StaticApiKeyAuthenticator([
+      { id: 'project-a', tenantId: 'tenant-a', keySha256: digest, scopes: ['responses:create'] },
+      { id: 'project-b', tenantId: 'tenant-b', keySha256: digest, scopes: ['responses:create'] },
+    ])).toThrow('duplicate SHA-256 digest');
+  });
+
   it('parses scoped credential metadata from JSON without plaintext keys', () => {
     const digest = sha256ApiKey('secret');
     const config = loadConfig({ ROUTER_ENV: 'production', COSMY_API_CREDENTIALS: JSON.stringify([{ id: 'project-a', tenantId: 'tenant-a', keySha256: digest, scopes: ['responses:create'] }]) });
