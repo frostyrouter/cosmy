@@ -52,6 +52,9 @@ export class InMemoryMetrics implements MetricsSink {
       this.outputTokens += metric.usage.outputTokens;
       this.totalCostUsd += metric.usage.estimatedCostUsd;
     }
+    if (this.latencyCount === this.latencies.length) {
+      this.latencyTotalMs -= this.latencies[this.latencyIndex]!;
+    }
     this.latencyTotalMs += metric.latencyMs;
     this.latencies[this.latencyIndex] = metric.latencyMs;
     this.latencyIndex = (this.latencyIndex + 1) % this.latencies.length;

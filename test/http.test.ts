@@ -52,6 +52,17 @@ describe('HTTP API', () => {
     expect(response.json().error.code).toBe('invalid_request');
   });
 
+  it('rejects tool definitions without an input schema locally', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/responses',
+      payload: { messages: [{ role: 'user', content: 'Use the lookup tool' }], tools: [{ name: 'lookup' }] },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_request');
+  });
+
   it('returns 400 for malformed JSON bodies instead of 500', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: '{not json', headers: { 'content-type': 'application/json' } });

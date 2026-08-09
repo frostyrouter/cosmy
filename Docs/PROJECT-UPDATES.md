@@ -58,3 +58,11 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files or subsystems: Execution, resilience, configuration, cache, tests.
 - Validation: 50 automated tests (2 new regression tests), TypeScript lint, live HTTP verification of the 504 timeout path and `RATE_LIMIT_MAX=0`.
 - Known limitations and follow-up: Streaming requests still have no total-duration bound by design; half-open breaker probes are not concurrency-limited.
+
+## 2026-08-09 - Review defect closure
+
+- Change: Tool definitions must now include `inputSchema`, so malformed requests fail locally instead of reaching a provider. The bounded latency window now removes an evicted sample from its running total, keeping count, total, and p95 mathematically consistent.
+- Impact: Provider requests cannot receive structurally incomplete tools, and long-running processes expose correct latency aggregates after the 2,048-sample window wraps.
+- Files: Request JSON schema, in-memory metrics, HTTP and metrics regression tests.
+- Validation: TypeScript lint, focused regression tests, full test suite, and production build.
+- Follow-up: This closes both unresolved P1 findings from PR #6; production metrics export remains part of the observability milestone.
