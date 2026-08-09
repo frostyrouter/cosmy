@@ -18,6 +18,7 @@ describe('managed database migrations', () => {
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS tenant_budgets'))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS idempotency_records'))).toBe(true);
     expect(queries.some((query) => query.includes('lease_expires_at'))).toBe(true);
-    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(4);
+    expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS admin_audit_events'))).toBe(true);
+    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(5);
   });
 });

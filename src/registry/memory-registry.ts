@@ -29,4 +29,13 @@ export class InMemoryModelRegistry implements VersionedModelRegistry {
     this.createdAt = nowIso();
     return this.currentSnapshot();
   }
+
+  load(snapshot: RegistrySnapshot): RegistrySnapshot {
+    this.models = new Map(snapshot.models.map((model) => [model.id, structuredClone(model)]));
+    this.cachedSnapshot = null;
+    this.version = snapshot.version;
+    this.source = snapshot.source;
+    this.createdAt = snapshot.createdAt;
+    return this.currentSnapshot();
+  }
 }

@@ -28,6 +28,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Durable persistence and budgets](20-durable-persistence.md)
 - [Tenant security](21-tenant-security.md)
 - [Safe retries and response caching](22-idempotency-and-cache.md)
+- [Control-plane operations](23-control-plane-operations.md)
 
 ## Decision status vocabulary
 

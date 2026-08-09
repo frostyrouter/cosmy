@@ -1,5 +1,7 @@
 # Control plane and deployment contracts
 
+Implementation update: PostgreSQL now persists complete registry publications and their audit events atomically, routers poll newer committed versions, and scoped administrative APIs manage models and tenant budgets. See [Control-plane operations](23-control-plane-operations.md) for the concise operator contract.
+
 The router’s data plane now depends on small interfaces that can be backed by durable infrastructure without changing routing code.
 
 ## Versioned model registry

@@ -19,6 +19,7 @@ export interface AppConfig {
   idempotencyTtlSeconds?: number;
   reservationLeaseSeconds?: number;
   reconciliationSweepSeconds?: number;
+  registryRefreshSeconds?: number;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -61,7 +62,8 @@ function credentialsEnv(value: string | undefined): readonly ApiCredential[] | u
     if (typeof entry !== 'object' || entry === null) throw new Error(`Credential at index ${index} must be an object`);
     const value = entry as Record<string, unknown>;
     const scopes = value.scopes ?? ['responses:create'];
-    if (typeof value.id !== 'string' || typeof value.tenantId !== 'string' || typeof value.keySha256 !== 'string' || !Array.isArray(scopes) || scopes.some((scope) => scope !== 'responses:create')) {
+    const allowedScopes: readonly ApiScope[] = ['responses:create', 'admin:read', 'admin:write'];
+    if (typeof value.id !== 'string' || typeof value.tenantId !== 'string' || typeof value.keySha256 !== 'string' || !Array.isArray(scopes) || scopes.some((scope) => !allowedScopes.includes(scope as ApiScope))) {
       throw new Error(`Credential at index ${index} is invalid`);
     }
     return { id: value.id, tenantId: value.tenantId, keySha256: value.keySha256, scopes: scopes as ApiScope[], ...(value.disabled === true ? { disabled: true } : {}) };
@@ -95,5 +97,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     idempotencyTtlSeconds: positiveIntegerEnv(env.IDEMPOTENCY_TTL_SECONDS, 86_400),
     reservationLeaseSeconds: positiveIntegerEnv(env.RESERVATION_LEASE_SECONDS, 300),
     reconciliationSweepSeconds: nonNegativeIntegerEnv(env.RECONCILIATION_SWEEP_SECONDS, 30),
+    registryRefreshSeconds: nonNegativeIntegerEnv(env.REGISTRY_REFRESH_SECONDS, 15),
   };
 }

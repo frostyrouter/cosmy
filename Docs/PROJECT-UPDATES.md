@@ -2,6 +2,17 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-10 - Audited administrative control plane
+
+- Change: Added `admin:read` and `admin:write` scopes plus authenticated APIs for immutable model-snapshot publication, tenant budget reads/writes, and audit-event reads.
+- Change: PostgreSQL now commits model or budget mutations with their actor audit event in one transaction. First-time budget creation serializes against reservation admission, and limits below current reserved plus spent usage are rejected.
+- Change: PostgreSQL-backed routers bootstrap from the durable registry and poll for newer committed versions; publication validates provider availability and routing-safe manifest bounds before activation.
+- Impact: Operators can change the routing catalog and tenant limits without editing process configuration or creating unaudited state, while multiple instances converge on one monotonic registry.
+- Validation: Scope/validation HTTP tests, migration checks, full unit/build validation, and real PostgreSQL transaction/race tests.
+- Operations: Apply migration 005, issue separate least-privilege admin credentials, and review `REGISTRY_REFRESH_SECONDS` before multi-instance rollout.
+- Follow-up: Credential lifecycle, policy bundles, paginated audit export, and one-click rollback remain future control-plane work.
+- Review hardening: Memory mode now enforces the same `budget_below_usage` invariant as PostgreSQL, with store-level and HTTP regressions.
+
 ## 2026-08-09 - Tenant-safe retries and cache boundaries
 
 - Change: Added tenant-scoped idempotency claims for non-streaming responses, with bounded memory storage and durable PostgreSQL replay through migration 003. Duplicate in-flight work is blocked, changed requests cannot reuse a key, and a result-storage outage keeps the claim instead of risking duplicate execution and billing.
