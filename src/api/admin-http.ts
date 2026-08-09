@@ -1,0 +1,74 @@
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import { z } from 'zod';
+import { RouterError } from '../domain/errors.js';
+import type { ModelConfiguration } from '../domain/types.js';
+import type { ControlPlaneService } from '../control-plane/service.js';
+import type { ApiScope, RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
+
+const modelSchema = z.object({
+  id: z.string().min(1).max(128), provider: z.string().min(1).max(64), model: z.string().min(1).max(128), version: z.string().min(1).max(64), enabled: z.boolean(),
+  capabilities: z.array(z.enum(['streaming', 'tools', 'structured-output', 'vision', 'reasoning'])).max(5),
+  modalities: z.array(z.enum(['text', 'image', 'audio', 'video', 'file'])).min(1).max(5),
+  coordinates: z.object({ technicality: z.number().min(0).max(1), creativity: z.number().min(0).max(1), quality: z.number().min(0).max(1), reasoning: z.number().min(0).max(1) }).strict(),
+  pricing: z.object({ inputPerMillionUsd: z.number().nonnegative(), outputPerMillionUsd: z.number().nonnegative(), cachedInputPerMillionUsd: z.number().nonnegative().optional() }).strict(),
+  contextWindow: z.number().int().positive(), maxOutputTokens: z.number().int().positive(), regions: z.array(z.string().min(1).max(64)).min(1),
+  allowedDataClasses: z.array(z.enum(['public', 'internal', 'confidential', 'restricted'])).min(1).max(4),
+  health: z.object({ availability: z.number().min(0).max(1), latencyP95Ms: z.number().nonnegative(), errorRate: z.number().min(0).max(1), checkedAt: z.string().min(1) }).strict(),
+  defaultTemperature: z.number().min(0).max(2).optional(),
+}).strict();
+
+const publishSchema = z.object({ source: z.string().min(1).max(200), models: z.array(modelSchema).min(1).max(1_000) }).strict();
+const budgetSchema = z.object({ limitUsd: z.number().nonnegative().max(1_000_000_000) }).strict();
+const tenantSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
+const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).strict();
+
+function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): RequestPrincipal {
+  const principal = authenticator?.authenticate(authorization);
+  if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401, false);
+  const authorized = principal.scopes.includes(scope) || (scope === 'admin:read' && principal.scopes.includes('admin:write'));
+  if (!authorized) throw new RouterError(`Credential requires '${scope}' scope`, 'authorization_error', 403, false);
+  return principal;
+}
+
+function sendError(reply: FastifyReply, error: unknown) {
+  if (error instanceof RouterError) return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message, retryable: error.retryable } });
+  if (error instanceof z.ZodError) return reply.code(400).send({ error: { code: 'invalid_request', message: 'Request validation failed', details: error.flatten() } });
+  throw error;
+}
+
+export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneService, authenticator?: RequestAuthenticator): void {
+  app.get('/v1/admin/models', async (request, reply) => {
+    try { requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return service.snapshot(); } catch (error) { return sendError(reply, error); }
+  });
+
+  app.put('/v1/admin/models', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const input = publishSchema.parse(request.body);
+      return await service.publishModels(input.models as readonly ModelConfiguration[], input.source, actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/budget', async (request, reply) => {
+    try {
+      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      return await service.budgetFor(tenantSchema.parse(request.params.tenantId));
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.put<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/budget', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const input = budgetSchema.parse(request.body);
+      return await service.setBudget(tenantSchema.parse(request.params.tenantId), input.limitUsd, actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get('/v1/admin/audit', async (request, reply) => {
+    try {
+      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      const query = auditQuerySchema.parse(request.query);
+      return { events: await service.listAudit(query.limit) };
+    } catch (error) { return sendError(reply, error); }
+  });
+}

@@ -9,7 +9,7 @@ Status: implemented foundation.
 | API keys | Runtime configuration stores SHA-256 digests, not plaintext tenant keys. |
 | Tenant identity | `/v1/responses` derives the billing tenant from the authenticated credential. |
 | Caller overrides | A different `policy.tenantId` is rejected with HTTP 403. |
-| Authorization | Credentials need the `responses:create` scope. |
+| Authorization | Response callers need `responses:create`; operators use separate `admin:read` or `admin:write` credentials. |
 | Production startup | Startup fails closed without credentials unless `ALLOW_UNAUTHENTICATED=true` is explicit. |
 | Probes | `/healthz` and `/readyz` stay unauthenticated and unmetered. |
 
@@ -41,6 +41,10 @@ The client sends `Authorization: Bearer <plaintext-key>`. Disable a key by addin
 | Remove legacy key | No traffic uses tenant `default`. | Restore the legacy key from the secret manager. |
 | Enforce production | `ALLOW_UNAUTHENTICATED` is absent or false. | Emergency override only; treat it as a security incident. |
 
+## Administrative separation
+
+Do not add admin scopes to ordinary application credentials. `admin:write` can publish the full model registry and change tenant limits; it implies `admin:read`. Duplicate enabled key digests fail startup so one bearer key can never resolve to two tenant identities. See [Control-plane operations](23-control-plane-operations.md).
+
 ## Next security milestone
 
-Static credentials are the safe bootstrap path, not the final control plane. Planned work adds durable hashed project keys, rotation without restart, OAuth/workload identity, per-action authorization, audit events, and immediate revocation.
+Static credentials are the safe bootstrap path, not the final identity plane. Planned work adds durable hashed project keys, rotation without restart, OAuth/workload identity, and immediate revocation. Administrative mutations are already scope-controlled and durably audited.

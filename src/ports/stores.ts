@@ -24,6 +24,18 @@ export interface UsageLedger {
   heartbeat?(reservation: UsageReservation): Promise<void>;
 }
 
+export interface BudgetSnapshot {
+  tenantId: string;
+  limitUsd?: number;
+  reservedUsd: number;
+  spentUsd: number;
+}
+
+export interface BudgetAdministration {
+  budgetFor(tenantId: string): Promise<BudgetSnapshot>;
+  setBudget(tenantId: string, limitUsd: number): Promise<BudgetSnapshot>;
+}
+
 export interface UsageReservation {
   id: string;
   tenantId: string;

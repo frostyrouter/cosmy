@@ -25,6 +25,11 @@ describe('tenant authentication', () => {
     expect(config.allowUnauthenticated).toBe(false);
   });
 
+  it('parses administrative scopes explicitly', () => {
+    const digest = sha256ApiKey('admin');
+    expect(loadConfig({ COSMY_API_CREDENTIALS: JSON.stringify([{ id: 'admin', tenantId: 'platform', keySha256: digest, scopes: ['admin:read', 'admin:write'] }]) }).apiCredentials?.[0]?.scopes).toEqual(['admin:read', 'admin:write']);
+  });
+
   it('rejects malformed credential configuration', () => {
     expect(() => loadConfig({ COSMY_API_CREDENTIALS: 'not-json' })).toThrow('valid JSON');
     expect(() => new StaticApiKeyAuthenticator([{ id: 'bad', tenantId: 'tenant', keySha256: 'plaintext', scopes: ['responses:create'] }])).toThrow('invalid SHA-256');

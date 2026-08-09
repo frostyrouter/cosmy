@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ModelConfiguration, ResponseResult } from '../domain/types.js';
-import type { RegistrySnapshot, UsageReservation } from '../ports/stores.js';
-import type { IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
+import type { BudgetSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
+import type { AuditEvent, ControlPlaneStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
@@ -16,6 +16,7 @@ interface ReservationRow { reservation_id: string; tenant_id: string; estimated_
 interface UsageTotalsRow { reserved_usd: string | number; spent_usd: string | number; }
 interface BudgetRow { tenant_id: string; limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; }
 interface IdempotencyRow { request_hash: string; status: 'processing' | 'completed'; response_json: ResponseResult | null; }
+interface AuditRow { id: string; actor_credential_id: string; actor_tenant_id: string; action: AuditEvent['action']; target: string; details: Record<string, unknown>; occurred_at: string; }
 
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
@@ -51,6 +52,7 @@ export class PostgresReservationRepository implements ReservationRepository {
     if (!this.db.transaction) throw new Error('PostgresReservationRepository requires transactional SQL client');
     const id = randomUUID();
     return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:tenant-budget:' || $1))", [input.tenantId]);
       if (this.defaultLimitUsd !== undefined) {
         await tx.query('INSERT INTO tenant_budgets (tenant_id, limit_usd) VALUES ($1, $2) ON CONFLICT (tenant_id) DO NOTHING', [input.tenantId, this.defaultLimitUsd]);
       }
@@ -91,13 +93,94 @@ export class PostgresReservationRepository implements ReservationRepository {
 
   async setBudget(tenantId: string, limitUsd: number): Promise<void> {
     if (!Number.isFinite(limitUsd) || limitUsd < 0) throw new Error('Budget limit must be a non-negative number');
-    await this.db.query('INSERT INTO tenant_budgets (tenant_id, limit_usd) VALUES ($1, $2) ON CONFLICT (tenant_id) DO UPDATE SET limit_usd = EXCLUDED.limit_usd, updated_at = now()', [tenantId, limitUsd]);
+    if (!this.db.transaction) throw new Error('PostgresReservationRepository requires transactional SQL client');
+    await this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:tenant-budget:' || $1))", [tenantId]);
+      await tx.query('SELECT reservation_id FROM usage_reservations WHERE tenant_id = $1 FOR UPDATE', [tenantId]);
+      const usage = await tx.query<UsageTotalsRow>('SELECT COALESCE(SUM(CASE WHEN reconciled_at IS NULL THEN estimated_cost_usd ELSE 0 END), 0) AS reserved_usd, COALESCE(SUM(CASE WHEN reconciled_at IS NOT NULL THEN actual_cost_usd ELSE 0 END), 0) AS spent_usd FROM usage_reservations WHERE tenant_id = $1', [tenantId]);
+      const reservedUsd = Number(usage.rows[0]?.reserved_usd ?? 0);
+      const spentUsd = Number(usage.rows[0]?.spent_usd ?? 0);
+      if (limitUsd < reservedUsd + spentUsd) throw new RouterError('Budget limit cannot be lower than current usage', 'budget_below_usage', 409, false);
+      await tx.query('INSERT INTO tenant_budgets (tenant_id, limit_usd, reserved_usd, spent_usd) VALUES ($1, $2, $3, $4) ON CONFLICT (tenant_id) DO UPDATE SET limit_usd = EXCLUDED.limit_usd, reserved_usd = EXCLUDED.reserved_usd, spent_usd = EXCLUDED.spent_usd, updated_at = now()', [tenantId, limitUsd, reservedUsd, spentUsd]);
+    });
   }
 
   async usageFor(tenantId: string): Promise<{ reservedUsd: number; spentUsd: number }> {
     const result = await this.db.query<UsageTotalsRow>('SELECT COALESCE(SUM(CASE WHEN reconciled_at IS NULL THEN estimated_cost_usd ELSE 0 END), 0) AS reserved_usd, COALESCE(SUM(CASE WHEN reconciled_at IS NOT NULL THEN actual_cost_usd ELSE 0 END), 0) AS spent_usd FROM usage_reservations WHERE tenant_id = $1', [tenantId]);
     const row = result.rows[0];
     return { reservedUsd: Number(row?.reserved_usd ?? 0), spentUsd: Number(row?.spent_usd ?? 0) };
+  }
+}
+
+function budgetSnapshot(tenantId: string, row: BudgetRow | undefined): BudgetSnapshot {
+  return {
+    tenantId,
+    ...(row ? { limitUsd: Number(row.limit_usd) } : {}),
+    reservedUsd: Number(row?.reserved_usd ?? 0),
+    spentUsd: Number(row?.spent_usd ?? 0),
+  };
+}
+
+function auditEvent(row: AuditRow): AuditEvent {
+  return {
+    id: row.id,
+    actorCredentialId: row.actor_credential_id,
+    actorTenantId: row.actor_tenant_id,
+    action: row.action,
+    target: row.target,
+    details: row.details,
+    occurredAt: new Date(row.occurred_at).toISOString(),
+  };
+}
+
+export class PostgresControlPlaneStore implements ControlPlaneStore {
+  constructor(private readonly db: SqlClient) {}
+
+  async publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      const inserted = await tx.query<SnapshotRow>('INSERT INTO model_registry_snapshots (source) VALUES ($1) RETURNING version, source, created_at', [input.source]);
+      const row = inserted.rows[0];
+      if (!row) throw new Error('Registry snapshot insert returned no row');
+      for (const model of input.models) await tx.query('INSERT INTO model_manifests (snapshot_version, model_id, provider, model_name, manifest) VALUES ($1, $2, $3, $4, $5)', [row.version, model.id, model.provider, model.model, JSON.stringify(model)]);
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'models.publish', `registry:${row.version}`, { source: input.source, modelCount: input.models.length });
+      return snapshot(row, input.models);
+    });
+  }
+
+  async budgetFor(tenantId: string): Promise<BudgetSnapshot> {
+    const result = await this.db.query<BudgetRow>('SELECT tenant_id, limit_usd, reserved_usd, spent_usd FROM tenant_budgets WHERE tenant_id = $1', [tenantId]);
+    const row = result.rows[0];
+    if (row) return budgetSnapshot(tenantId, row);
+    const usage = await this.db.query<UsageTotalsRow>('SELECT COALESCE(SUM(CASE WHEN reconciled_at IS NULL THEN estimated_cost_usd ELSE 0 END), 0) AS reserved_usd, COALESCE(SUM(CASE WHEN reconciled_at IS NOT NULL THEN actual_cost_usd ELSE 0 END), 0) AS spent_usd FROM usage_reservations WHERE tenant_id = $1', [tenantId]);
+    const totals = usage.rows[0];
+    return { tenantId, reservedUsd: Number(totals?.reserved_usd ?? 0), spentUsd: Number(totals?.spent_usd ?? 0) };
+  }
+
+  async setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:tenant-budget:' || $1))", [input.tenantId]);
+      await tx.query('SELECT reservation_id FROM usage_reservations WHERE tenant_id = $1 FOR UPDATE', [input.tenantId]);
+      const usage = await tx.query<UsageTotalsRow>('SELECT COALESCE(SUM(CASE WHEN reconciled_at IS NULL THEN estimated_cost_usd ELSE 0 END), 0) AS reserved_usd, COALESCE(SUM(CASE WHEN reconciled_at IS NOT NULL THEN actual_cost_usd ELSE 0 END), 0) AS spent_usd FROM usage_reservations WHERE tenant_id = $1', [input.tenantId]);
+      const reservedUsd = Number(usage.rows[0]?.reserved_usd ?? 0);
+      const spentUsd = Number(usage.rows[0]?.spent_usd ?? 0);
+      if (input.limitUsd < reservedUsd + spentUsd) throw new RouterError('Budget limit cannot be lower than current usage', 'budget_below_usage', 409, false);
+      const result = await tx.query<BudgetRow>('INSERT INTO tenant_budgets (tenant_id, limit_usd, reserved_usd, spent_usd) VALUES ($1, $2, $3, $4) ON CONFLICT (tenant_id) DO UPDATE SET limit_usd = EXCLUDED.limit_usd, reserved_usd = EXCLUDED.reserved_usd, spent_usd = EXCLUDED.spent_usd, updated_at = now() RETURNING tenant_id, limit_usd, reserved_usd, spent_usd', [input.tenantId, input.limitUsd, reservedUsd, spentUsd]);
+      const row = result.rows[0];
+      if (!row) throw new Error('Budget update returned no row');
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'budget.set', `tenant:${input.tenantId}`, { limitUsd: input.limitUsd });
+      return budgetSnapshot(input.tenantId, row);
+    });
+  }
+
+  async listAudit(limit: number): Promise<readonly AuditEvent[]> {
+    const result = await this.db.query<AuditRow>('SELECT id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at FROM admin_audit_events ORDER BY occurred_at DESC, id DESC LIMIT $1', [limit]);
+    return result.rows.map(auditEvent);
+  }
+
+  private async appendAudit(db: SqlClient, actorCredentialId: string, actorTenantId: string, action: AuditEvent['action'], target: string, details: Record<string, unknown>): Promise<void> {
+    await db.query('INSERT INTO admin_audit_events (id, actor_credential_id, actor_tenant_id, action, target, details) VALUES ($1, $2, $3, $4, $5, $6)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
   }
 }
 

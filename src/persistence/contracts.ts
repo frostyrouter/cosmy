@@ -1,5 +1,5 @@
 import type { ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
-import type { ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
+import type { BudgetSnapshot, ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 
 export interface RegistryRepository {
   getCurrent(): Promise<RegistrySnapshot | undefined>;
@@ -36,6 +36,23 @@ export interface IdempotencyStore {
   claim(tenantId: string, key: string, requestHash: string, ttlSeconds: number): Promise<IdempotencyClaim>;
   complete(tenantId: string, key: string, requestHash: string, response: ResponseResult): Promise<void>;
   release(tenantId: string, key: string, requestHash: string): Promise<void>;
+}
+
+export interface AuditEvent {
+  id: string;
+  actorCredentialId: string;
+  actorTenantId: string;
+  action: 'models.publish' | 'budget.set';
+  target: string;
+  details: Record<string, unknown>;
+  occurredAt: string;
+}
+
+export interface ControlPlaneStore {
+  publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
+  budgetFor(tenantId: string): Promise<BudgetSnapshot>;
+  setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot>;
+  listAudit(limit: number): Promise<readonly AuditEvent[]>;
 }
 
 export interface UsageRecord {
