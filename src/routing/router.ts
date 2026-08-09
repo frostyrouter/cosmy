@@ -9,6 +9,8 @@ import { nowIso } from '../util/ids.js';
 export class DeterministicRouter {
   constructor(private readonly registry: ModelRegistry, private readonly policy: Policy = defaultPolicy) {}
 
+  get policyVersion(): string { return this.policy.version; }
+
   decide(requestId: string, request: ResponseRequest): RouteDecision {
     const features = extractFeatures(request);
     if (request.model) {

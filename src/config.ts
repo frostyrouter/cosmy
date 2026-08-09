@@ -9,6 +9,9 @@ export interface AppConfig {
   databaseUrl?: string;
   cacheMode?: 'off' | 'memory';
   responseCacheTtlSeconds?: number;
+  rateLimitMax?: number;
+  tenantBudgetUsd?: number;
+  apiKey?: string;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -32,5 +35,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.DATABASE_URL ? { databaseUrl: env.DATABASE_URL } : {}),
     cacheMode: env.CACHE_MODE === 'memory' ? 'memory' : 'off',
     responseCacheTtlSeconds: numberEnv(env.RESPONSE_CACHE_TTL_SECONDS, 60),
+    ...(env.RATE_LIMIT_MAX ? { rateLimitMax: numberEnv(env.RATE_LIMIT_MAX, 0) } : {}),
+    ...(env.TENANT_BUDGET_USD ? { tenantBudgetUsd: numberEnv(env.TENANT_BUDGET_USD, 0) } : {}),
+    ...(env.COSMY_API_KEY ? { apiKey: env.COSMY_API_KEY } : {}),
   };
 }

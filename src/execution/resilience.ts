@@ -16,7 +16,7 @@ class CircuitBreaker {
   constructor(private readonly threshold: number, private readonly cooldownMs: number) {}
 
   before(): void {
-    if (this.openedAt > 0 && Date.now() - this.openedAt < this.cooldownMs) throw new ProviderError('Provider circuit is open', false);
+    if (this.openedAt > 0 && Date.now() - this.openedAt < this.cooldownMs) throw new ProviderError('Provider circuit is open', true);
     if (this.openedAt > 0) { this.openedAt = 0; this.failures = 0; }
   }
   success(): void { this.failures = 0; this.openedAt = 0; }
@@ -25,20 +25,22 @@ class CircuitBreaker {
 
 function retryable(error: unknown): boolean { return error instanceof ProviderError ? error.retryable : true; }
 
-function attemptSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortSignal; cancel: () => void } {
+function attemptSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortSignal; cancel: () => void; disarm: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const cancel = () => { clearTimeout(timer); controller.abort(); };
+  const disarm = () => clearTimeout(timer);
+  const cancel = () => { disarm(); controller.abort(); parent.removeEventListener('abort', cancel); };
   if (parent.aborted) cancel();
   else parent.addEventListener('abort', cancel, { once: true });
-  return { signal: controller.signal, cancel };
+  return { signal: controller.signal, cancel, disarm };
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(new RequestCancelledError());
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); reject(new RequestCancelledError()); }, { once: true });
+    const onAbort = () => { clearTimeout(timer); reject(new RequestCancelledError()); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -63,8 +65,8 @@ export class ResilientProvider implements ProviderAdapter {
       } catch (error) {
         current.cancel();
         lastError = error;
-        this.breaker.failure();
         if (input.signal.aborted) throw new RequestCancelledError();
+        if (retryable(error)) this.breaker.failure();
         if (!retryable(error) || attempt === this.options.maxRetries) throw error;
         await wait(this.options.baseDelayMs ?? 100 * (2 ** attempt), input.signal);
       }
@@ -80,6 +82,7 @@ export class ResilientProvider implements ProviderAdapter {
       let emitted = false;
       try {
         for await (const chunk of this.inner.stream({ ...input, signal: current.signal })) {
+          if (!emitted) current.disarm();
           emitted = emitted || chunk.delta.length > 0;
           yield chunk;
         }
@@ -89,8 +92,8 @@ export class ResilientProvider implements ProviderAdapter {
       } catch (error) {
         current.cancel();
         lastError = error;
-        this.breaker.failure();
         if (input.signal.aborted) throw new RequestCancelledError();
+        if (retryable(error)) this.breaker.failure();
         if (emitted || !retryable(error) || attempt === this.options.maxRetries) throw error;
         await wait(this.options.baseDelayMs ?? 100 * (2 ** attempt), input.signal);
       }

@@ -11,7 +11,7 @@ export class InMemoryUsageLedger implements UsageLedger {
   constructor(private readonly limits: Record<string, number> = {}) {}
 
   async reserve(input: { tenantId: string; estimatedCostUsd: number }): Promise<UsageReservation> {
-    const limit = this.limits[input.tenantId];
+    const limit = this.limits[input.tenantId] ?? this.limits['*'];
     const current = this.reserved.get(input.tenantId) ?? 0;
     if (limit !== undefined && current + input.estimatedCostUsd > limit) {
       throw new RouterError('Tenant budget would be exceeded', 'budget_exceeded', 429, false);

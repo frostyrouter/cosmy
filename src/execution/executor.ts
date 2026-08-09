@@ -1,10 +1,8 @@
 import { performance } from 'node:perf_hooks';
 import type { ProviderAdapter } from '../ports/provider.js';
-import type { HealthStore, UsageLedger } from '../ports/stores.js';
-import type { ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
-import { providerForModel } from '../providers/simulator.js';
-import { RequestCancelledError } from '../domain/errors.js';
-import { ProviderError } from '../domain/errors.js';
+import type { HealthStore, UsageLedger, UsageReservation } from '../ports/stores.js';
+import type { ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
+import { ProviderError, RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { MetricsSink } from '../observability/metrics.js';
 
 export interface ExecutionOptions {
@@ -15,33 +13,60 @@ export interface ExecutionOptions {
 }
 
 export class RequestExecutor {
+  private readonly providerByName: Map<string, ProviderAdapter>;
+
   constructor(
     private readonly providers: readonly ProviderAdapter[],
     private readonly usage: UsageLedger,
     private readonly health: HealthStore,
     private readonly metrics?: MetricsSink,
-  ) {}
+    private readonly requestTimeoutMs?: number,
+  ) {
+    this.providerByName = new Map(providers.map((provider) => [provider.name, provider]));
+  }
+
+  private providerFor(model: ModelConfiguration): ProviderAdapter {
+    const provider = this.providerByName.get(model.provider);
+    if (!provider) throw new ProviderError(`Provider '${model.provider}' is not configured`, false);
+    return provider;
+  }
 
   async execute(options: ExecutionOptions): Promise<ResponseResult> {
     const { request, route, requestId, signal } = options;
-    if (signal.aborted) throw new RequestCancelledError();
-    const candidates = [route.selected, ...route.alternatives];
-    let lastError: unknown;
-    for (const [fallbackIndex, candidate] of candidates.entries()) {
-      const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
-      try {
-        return await this.executeCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex });
-      } catch (error) {
-        lastError = error;
-        if (request.policy?.allowFallback === false || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+    const deadline = this.requestTimeoutMs !== undefined ? abortAfter(signal, this.requestTimeoutMs) : undefined;
+    const effective = deadline?.signal ?? signal;
+    try {
+      if (effective.aborted) throw new RequestCancelledError();
+      if (route.alternatives.length === 0) return await this.executeCandidate({ requestId, route, request, signal: effective, fallbackIndex: 0 });
+      const candidates = [route.selected, ...route.alternatives];
+      let lastError: unknown;
+      for (const [fallbackIndex, candidate] of candidates.entries()) {
+        const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
+        try {
+          return await this.executeCandidate({ requestId, route: attemptRoute, request, signal: effective, fallbackIndex });
+        } catch (error) {
+          lastError = error;
+          if (request.policy?.allowFallback === false || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+        }
       }
+      throw lastError instanceof Error ? lastError : new ProviderError('All route candidates failed');
+    } catch (error) {
+      if (deadline?.signal.aborted && !signal.aborted) {
+        throw new RouterError('Request exceeded the configured deadline', 'timeout', 504, true);
+      }
+      throw error;
+    } finally {
+      deadline?.dispose();
     }
-    throw lastError instanceof Error ? lastError : new ProviderError('All route candidates failed');
   }
 
   async *stream(options: ExecutionOptions): AsyncIterable<ResponseChunk> {
     const { request, route, requestId, signal } = options;
     if (signal.aborted) throw new RequestCancelledError();
+    if (route.alternatives.length === 0) {
+      for await (const chunk of this.streamCandidate({ requestId, route, request, signal, fallbackIndex: 0 })) yield chunk;
+      return;
+    }
     const candidates = [route.selected, ...route.alternatives];
     for (const [fallbackIndex, candidate] of candidates.entries()) {
       const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
@@ -58,9 +83,20 @@ export class RequestExecutor {
     }
   }
 
+  private async reconcileBestEffort(reservation: UsageReservation, actualCostUsd: number): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.usage.reconcile(reservation, actualCostUsd);
+        return;
+      } catch {
+        // transient store failure; retry once, then best-effort release
+      }
+    }
+  }
+
   private async executeCandidate(options: ExecutionOptions & { fallbackIndex: number }): Promise<ResponseResult> {
     const { request, route, requestId, signal, fallbackIndex } = options;
-    const provider = providerForModel(this.providers, route.selected.model);
+    const provider = this.providerFor(route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
@@ -68,13 +104,13 @@ export class RequestExecutor {
       const response = await provider.complete({ request: { ...request, requestId }, model: route.selected.model, signal });
       const latencyMs = performance.now() - started;
       this.health.markSuccess(route.selected.model.id, latencyMs);
-      await this.usage.reconcile(reservation, response.usage.estimatedCostUsd);
+      await this.reconcileBestEffort(reservation, response.usage.estimatedCostUsd);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: response.usage, fallbackIndex });
       return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
       const latencyMs = performance.now() - started;
-      this.health.markFailure(route.selected.model.id);
-      await this.usage.reconcile(reservation, 0);
+      if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
+      await this.reconcileBestEffort(reservation, 0);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs, fallbackIndex });
       throw error;
     }
@@ -82,7 +118,7 @@ export class RequestExecutor {
 
   private async *streamCandidate(options: ExecutionOptions & { fallbackIndex: number }): AsyncIterable<ResponseChunk> {
     const { request, route, requestId, signal, fallbackIndex } = options;
-    const provider = providerForModel(this.providers, route.selected.model);
+    const provider = this.providerFor(route.selected.model);
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
@@ -91,20 +127,37 @@ export class RequestExecutor {
     try {
       for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal })) {
         yield { ...chunk, requestId };
-        if (chunk.done && chunk.usage) { const latencyMs = performance.now() - started; this.health.markSuccess(route.selected.model.id, latencyMs); actualCostUsd = chunk.usage.estimatedCostUsd; completed = true; this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: chunk.usage, fallbackIndex }); }
+        if (chunk.done) {
+          const latencyMs = performance.now() - started;
+          this.health.markSuccess(route.selected.model.id, latencyMs);
+          completed = true;
+          if (chunk.usage) {
+            actualCostUsd = chunk.usage.estimatedCostUsd;
+            this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: chunk.usage, fallbackIndex });
+          } else {
+            actualCostUsd = reservation.estimatedCostUsd;
+            this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, fallbackIndex });
+          }
+        }
       }
     } catch (error) {
-      this.health.markFailure(route.selected.model.id);
+      if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
       throw error;
-    } finally { await this.usage.reconcile(reservation, completed ? actualCostUsd : 0); }
+    } finally { await this.reconcileBestEffort(reservation, completed ? actualCostUsd : 0); }
   }
 }
 
-export function abortAfter(signal: AbortSignal, timeoutMs: number): AbortController {
+export interface Deadline { signal: AbortSignal; dispose: () => void; }
+
+export function abortAfter(signal: AbortSignal, timeoutMs: number): Deadline {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  signal.addEventListener('abort', () => { clearTimeout(timer); controller.abort(); }, { once: true });
+  const onParentAbort = () => { clearTimeout(timer); controller.abort(); };
+  const timer = setTimeout(() => { signal.removeEventListener('abort', onParentAbort); controller.abort(); }, timeoutMs);
+  signal.addEventListener('abort', onParentAbort, { once: true });
   controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
-  return controller;
+  return {
+    signal: controller.signal,
+    dispose: () => { clearTimeout(timer); signal.removeEventListener('abort', onParentAbort); },
+  };
 }

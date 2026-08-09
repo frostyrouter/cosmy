@@ -52,11 +52,108 @@ describe('HTTP API', () => {
     expect(response.json().error.code).toBe('invalid_request');
   });
 
+  it('returns 400 for malformed JSON bodies instead of 500', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: '{not json', headers: { 'content-type': 'application/json' } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_request');
+  });
+
   it('serves stream chunks as SSE events', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'hello world' }] } });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/event-stream');
     expect(response.body).toContain('event: done');
+  });
+
+  it('reports unready when the readiness check fails', async () => {
+    const { default: Fastify } = await import('fastify');
+    const { registerRoutes } = await import('../src/api/http.js');
+    const service = { complete: async () => { throw new Error('unused'); }, stream: async function* () {} } as unknown as import('../src/service/router-service.js').RouterService;
+    const bare = Fastify({ logger: false });
+    registerRoutes(bare, service, async () => false);
+    const response = await bare.inject({ method: 'GET', url: '/readyz' });
+    expect(response.statusCode).toBe(503);
+    await bare.close();
+  });
+
+  it('requires the API key on responses but not on health probes', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, apiKey: 'sekret' });
+    const denied = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(denied.statusCode).toBe(401);
+    expect(denied.json().error.code).toBe('authentication_error');
+    const allowed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer sekret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(allowed.statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/healthz' })).statusCode).toBe(200);
+  });
+
+  it('never rate-limits health endpoints', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, rateLimitMax: 2 });
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) statuses.push((await app.inject({ method: 'GET', url: '/healthz' })).statusCode);
+    expect(statuses).toEqual([200, 200, 200, 200]);
+    const limited = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'x' }] } });
+    expect([200, 429]).toContain(limited.statusCode);
+  });
+
+  it('treats a zero rate limit as unlimited', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, rateLimitMax: 0 });
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i++) statuses.push((await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'x' }] } })).statusCode);
+    expect(statuses).toEqual([200, 200, 200, 200, 200]);
+  });
+
+  it('returns a 504 timeout when the request deadline expires over HTTP', async () => {
+    const model = { id: 'slow', provider: 'slow', model: 'slow', version: '1', enabled: true, capabilities: [], modalities: ['text' as const], coordinates: { technicality: 0.5, creativity: 0.5, quality: 0.5, reasoning: 0.5 }, pricing: { inputPerMillionUsd: 0.1, outputPerMillionUsd: 0.3 }, contextWindow: 16_000, maxOutputTokens: 4_000, regions: ['global'], allowedDataClasses: ['public' as const, 'internal' as const], health: { availability: 1, latencyP95Ms: 10, errorRate: 0, checkedAt: 'test' } };
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const slow: import('../src/ports/provider.js').ProviderAdapter = {
+      name: 'slow', listModels: () => [model],
+      complete: async (input) => { await delay(300); if (input.signal.aborted) throw new Error('aborted'); return { output: 'late', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }; },
+      stream: async function* () {},
+    };
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 100, providerMaxRetries: 0 }, { providers: [slow], registry: new (await import('../src/registry/memory-registry.js')).InMemoryModelRegistry([model]) });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { model: 'slow', messages: [{ role: 'user', content: 'hello' }] } });
+    expect(response.statusCode).toBe(504);
+    expect(response.json().error.code).toBe('timeout');
+  });
+
+  it('returns 422 for a streaming request with an unknown model', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, model: 'missing', messages: [{ role: 'user', content: 'hello' }] } });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe('no_eligible_model');
+  });
+
+  it('does not leak provider error internals to clients', async () => {
+    const failing: import('../src/ports/provider.js').ProviderAdapter = {
+      name: 'simulator', listModels: () => [],
+      complete: async () => { throw new Error('upstream secret detail'); },
+      stream: async function* () {},
+    };
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 }, { providers: [failing] });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toContain('secret detail');
+    expect(response.json().error.message).toBe('An unexpected error occurred');
+  });
+
+  it('invalidates cached responses when the registry version changes', async () => {
+    const { InMemoryModelRegistry } = await import('../src/registry/memory-registry.js');
+    const { DeterministicRouter } = await import('../src/routing/router.js');
+    const { RouterService } = await import('../src/service/router-service.js');
+    const { defaultModels } = await import('../src/registry/default-models.js');
+    const registry = new InMemoryModelRegistry(defaultModels);
+    const cache = new InMemoryResponseCache();
+    const calls: string[] = [];
+    const executor = { execute: async (options: { requestId: string }) => { calls.push(options.requestId); return { requestId: options.requestId, model: 'sim', provider: 'simulator', output: 'out', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, status: 'completed', finishReason: 'stop', route: {} }; }, stream: async function* () {} } as unknown as import('../src/execution/executor.js').RequestExecutor;
+    const service = new RouterService(new DeterministicRouter(registry), executor, cache, 60, () => 1);
+    const payload = { messages: [{ role: 'user' as const, content: 'cache version test' }] };
+    await service.complete(payload, new AbortController().signal);
+    await service.complete(payload, new AbortController().signal);
+    expect(calls).toHaveLength(1);
+    const updated = new RouterService(new DeterministicRouter(registry), executor, cache, 60, () => 2);
+    await updated.complete(payload, new AbortController().signal);
+    expect(calls).toHaveLength(2);
   });
 });

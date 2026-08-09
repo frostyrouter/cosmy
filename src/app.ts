@@ -30,9 +30,21 @@ export interface AppDependencies {
 }
 
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: { level: config.logLevel } });
+  const app = Fastify({ logger: { level: config.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
+    try { done(null, JSON.parse(String(body))); } catch { done(Object.assign(new Error('Invalid JSON body'), { statusCode: 400 })); }
+  });
   await app.register(cors, { origin: false });
-  await app.register(rateLimit, { max: config.environment === 'production' ? 120 : 1_000, timeWindow: '1 minute' });
+  const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
+  if (rateLimitMax > 0) await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
+  if (config.apiKey) {
+    app.addHook('preHandler', async (request, reply) => {
+      if (request.routeOptions.url === '/healthz' || request.routeOptions.url === '/readyz') return;
+      if (request.headers.authorization !== `Bearer ${config.apiKey}`) {
+        return reply.code(401).send({ error: { code: 'authentication_error', message: 'Missing or invalid API key' } });
+      }
+    });
+  }
   const registry = dependencies.registry ?? new InMemoryModelRegistry([...defaultModels, ...configuredModelManifests()]);
   let postgres: PostgresSqlClient | undefined;
   let usage = dependencies.usage;
@@ -48,7 +60,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     }
     app.addHook('onClose', async () => { await postgres?.close(); });
   }
-  usage ??= new InMemoryUsageLedger();
+  usage ??= new InMemoryUsageLedger(config.tenantBudgetUsd !== undefined ? { '*': config.tenantBudgetUsd } : {});
   let cache = dependencies.cache;
   if (!cache && config.cacheMode === 'memory') {
     cache = new InMemoryResponseCache();
@@ -57,7 +69,14 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
   const router = new DeterministicRouter(registry);
   const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
-  const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics);
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds));
+  const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics, config.requestTimeoutMs);
+  const db = postgres;
+  const readyCheck = db
+    ? async (): Promise<boolean> => {
+        try { await db.query('SELECT 1'); return true; } catch { return false; }
+      }
+    : undefined;
+  const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion), readyCheck);
   return app;
 }
