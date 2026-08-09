@@ -49,6 +49,16 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Validation: 47 automated tests (3 new regression tests), TypeScript lint, production build, live HTTP smoke (stream abort, 50 concurrent requests, server restart), and `npm start` smoke test.
 - Known limitations and follow-up: Postgres-backed budget enforcement and per-tenant auth remain open; reconciliation failure is retried once then released as best-effort, which under persistent store outages can leave a reservation un-reconciled.
 
+## 2026-08-09 - Partial-config defaults fix for the latency benchmark and composition root
+
+- Change: `buildApp` now resolves caller-supplied partial configuration against `loadConfig()` defaults (`requestTimeoutMs`, `providerMaxRetries`, and the other env-driven settings) instead of passing `undefined` resilience options into the provider retry wrapper.
+- Change: The `AppConfig` interface now marks `requestTimeoutMs` and `providerMaxRetries` optional, matching how the benchmark and tests construct partial configs; `resolveConfig()` in `src/config.ts` produces the fully-resolved configuration with `loadConfig()` as the single source of defaults.
+- Bug fixed: With a partial config (as the latency benchmark has always used), the resilient provider retry loop ran zero times (`0 <= undefined` is false), so every request failed with HTTP 502 `provider_error` and the benchmark reported 20,000/20,000 request errors. The benchmark now measures real traffic with 0 errors.
+- Impact: `scripts/bench.ts` and any partial-config caller of `buildApp` get working execution with the documented timeouts and retries; full-config callers and the server entry point are unchanged.
+- Files or subsystems: Configuration, application composition, latency benchmark, HTTP tests.
+- Validation: 51 automated tests (1 new regression test that builds the app with a partial config and expects a completed response; it failed with 502 before the fix), TypeScript lint, production build, live benchmark runs (0 errors), and integration smoke against the default config.
+- Known limitations and follow-up: Streaming requests keep their documented time-to-first-token semantics with no total-duration bound by design; a partial config now also picks up auth/rate-limit settings from the environment, matching server behavior.
+
 ## 2026-08-09 - Deadline fast-path fix, timeout semantics, and rate-limit edge
 
 - Change: Fixed a real deadline bug where the overall request deadline was disposed immediately on the single-candidate fast path (the un-awaited return let `finally` clear the timer before execution started), so `REQUEST_TIMEOUT_MS` was not enforced for the most common routing outcome.

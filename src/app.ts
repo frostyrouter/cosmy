@@ -12,7 +12,7 @@ import { resilientProviders } from './execution/resilience.js';
 import { RouterService } from './service/router-service.js';
 import { registerRoutes } from './api/http.js';
 import { InMemoryMetrics } from './observability/metrics.js';
-import { loadConfig, type AppConfig } from './config.js';
+import { loadConfig, resolveConfig, type AppConfig } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
 import type { HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
 import type { MetricsSink } from './observability/metrics.js';
@@ -30,17 +30,18 @@ export interface AppDependencies {
 }
 
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: { level: config.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
+  const resolved = resolveConfig(config);
+  const app = Fastify({ logger: { level: resolved.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
     try { done(null, JSON.parse(String(body))); } catch { done(Object.assign(new Error('Invalid JSON body'), { statusCode: 400 })); }
   });
   await app.register(cors, { origin: false });
-  const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
+  const rateLimitMax = resolved.rateLimitMax ?? (resolved.environment === 'production' ? 120 : 1_000);
   if (rateLimitMax > 0) await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
-  if (config.apiKey) {
+  if (resolved.apiKey) {
     app.addHook('preHandler', async (request, reply) => {
       if (request.routeOptions.url === '/healthz' || request.routeOptions.url === '/readyz') return;
-      if (request.headers.authorization !== `Bearer ${config.apiKey}`) {
+      if (request.headers.authorization !== `Bearer ${resolved.apiKey}`) {
         return reply.code(401).send({ error: { code: 'authentication_error', message: 'Missing or invalid API key' } });
       }
     });
@@ -48,9 +49,9 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const registry = dependencies.registry ?? new InMemoryModelRegistry([...defaultModels, ...configuredModelManifests()]);
   let postgres: PostgresSqlClient | undefined;
   let usage = dependencies.usage;
-  if (!usage && config.persistenceMode === 'postgres') {
-    if (!config.databaseUrl) throw new Error('DATABASE_URL is required when PERSISTENCE_MODE=postgres');
-    postgres = await createPostgresSqlClient(config.databaseUrl);
+  if (!usage && resolved.persistenceMode === 'postgres') {
+    if (!resolved.databaseUrl) throw new Error('DATABASE_URL is required when PERSISTENCE_MODE=postgres');
+    postgres = await createPostgresSqlClient(resolved.databaseUrl);
     try {
       await applyControlPlaneMigration(postgres);
       usage = new PostgresReservationRepository(postgres);
@@ -60,16 +61,16 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     }
     app.addHook('onClose', async () => { await postgres?.close(); });
   }
-  usage ??= new InMemoryUsageLedger(config.tenantBudgetUsd !== undefined ? { '*': config.tenantBudgetUsd } : {});
+  usage ??= new InMemoryUsageLedger(resolved.tenantBudgetUsd !== undefined ? { '*': resolved.tenantBudgetUsd } : {});
   let cache = dependencies.cache;
-  if (!cache && config.cacheMode === 'memory') {
+  if (!cache && resolved.cacheMode === 'memory') {
     cache = new InMemoryResponseCache();
   }
   const health = dependencies.health ?? new InMemoryHealthStore();
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
   const router = new DeterministicRouter(registry);
-  const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
-  const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics, config.requestTimeoutMs);
+  const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: resolved.providerMaxRetries, timeoutMs: resolved.requestTimeoutMs });
+  const executor = new RequestExecutor(dependencies.providers ?? providers, usage, health, metrics, resolved.requestTimeoutMs);
   const db = postgres;
   const readyCheck = db
     ? async (): Promise<boolean> => {

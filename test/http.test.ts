@@ -138,6 +138,13 @@ describe('HTTP API', () => {
     expect(response.json().error.message).toBe('An unexpected error occurred');
   });
 
+  it('applies resilience defaults when built with a partial config', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'Rewrite this email politely' }] } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe('completed');
+  });
+
   it('invalidates cached responses when the registry version changes', async () => {
     const { InMemoryModelRegistry } = await import('../src/registry/memory-registry.js');
     const { DeterministicRouter } = await import('../src/routing/router.js');

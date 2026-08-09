@@ -3,8 +3,8 @@ export interface AppConfig {
   port: number;
   logLevel: string;
   environment: 'development' | 'test' | 'production';
-  requestTimeoutMs: number;
-  providerMaxRetries: number;
+  requestTimeoutMs?: number;
+  providerMaxRetries?: number;
   persistenceMode?: 'memory' | 'postgres';
   databaseUrl?: string;
   cacheMode?: 'off' | 'memory';
@@ -19,7 +19,19 @@ function numberEnv(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export type ResolvedAppConfig = Omit<AppConfig, 'requestTimeoutMs' | 'providerMaxRetries'> & { requestTimeoutMs: number; providerMaxRetries: number };
+
+export function resolveConfig(config: AppConfig): ResolvedAppConfig {
+  const defaults = loadConfig();
+  return {
+    ...defaults,
+    ...config,
+    requestTimeoutMs: config.requestTimeoutMs ?? defaults.requestTimeoutMs,
+    providerMaxRetries: config.providerMaxRetries ?? defaults.providerMaxRetries,
+  };
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): ResolvedAppConfig {
   const environment = env.ROUTER_ENV ?? 'development';
   if (!['development', 'test', 'production'].includes(environment)) {
     throw new Error(`Unsupported ROUTER_ENV: ${environment}`);
