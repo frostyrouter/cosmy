@@ -1,3 +1,5 @@
+import type { ApiCredential, ApiScope } from './security/auth.js';
+
 export interface AppConfig {
   host: string;
   port: number;
@@ -12,6 +14,8 @@ export interface AppConfig {
   rateLimitMax?: number;
   tenantBudgetUsd?: number;
   apiKey?: string;
+  apiCredentials?: readonly ApiCredential[];
+  allowUnauthenticated?: boolean;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -19,11 +23,36 @@ function numberEnv(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function booleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`Expected boolean environment value, received '${value}'`);
+}
+
+function credentialsEnv(value: string | undefined): readonly ApiCredential[] | undefined {
+  if (!value) return undefined;
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw new Error('COSMY_API_CREDENTIALS must be valid JSON'); }
+  if (!Array.isArray(parsed)) throw new Error('COSMY_API_CREDENTIALS must be a JSON array');
+  return parsed.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) throw new Error(`Credential at index ${index} must be an object`);
+    const value = entry as Record<string, unknown>;
+    const scopes = value.scopes ?? ['responses:create'];
+    if (typeof value.id !== 'string' || typeof value.tenantId !== 'string' || typeof value.keySha256 !== 'string' || !Array.isArray(scopes) || scopes.some((scope) => scope !== 'responses:create')) {
+      throw new Error(`Credential at index ${index} is invalid`);
+    }
+    return { id: value.id, tenantId: value.tenantId, keySha256: value.keySha256, scopes: scopes as ApiScope[], ...(value.disabled === true ? { disabled: true } : {}) };
+  });
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const environment = env.ROUTER_ENV ?? 'development';
   if (!['development', 'test', 'production'].includes(environment)) {
     throw new Error(`Unsupported ROUTER_ENV: ${environment}`);
   }
+  const production = environment === 'production';
+  const apiCredentials = credentialsEnv(env.COSMY_API_CREDENTIALS);
   return {
     host: env.HOST ?? '0.0.0.0',
     port: numberEnv(env.PORT, 8080),
@@ -38,5 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.RATE_LIMIT_MAX ? { rateLimitMax: numberEnv(env.RATE_LIMIT_MAX, 0) } : {}),
     ...(env.TENANT_BUDGET_USD ? { tenantBudgetUsd: numberEnv(env.TENANT_BUDGET_USD, 0) } : {}),
     ...(env.COSMY_API_KEY ? { apiKey: env.COSMY_API_KEY } : {}),
+    ...(apiCredentials ? { apiCredentials } : {}),
+    allowUnauthenticated: booleanEnv(env.ALLOW_UNAUTHENTICATED, !production),
   };
 }

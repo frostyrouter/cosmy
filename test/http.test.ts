@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { InMemoryResponseCache } from '../src/persistence/memory-cache.js';
+import { sha256ApiKey } from '../src/security/auth.js';
 
 describe('HTTP API', () => {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
@@ -97,6 +98,39 @@ describe('HTTP API', () => {
     const allowed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer sekret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
     expect(allowed.statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/healthz' })).statusCode).toBe(200);
+  });
+
+  it('derives billing tenant from a hashed scoped credential', async () => {
+    const reservedFor: string[] = [];
+    const usage: import('../src/ports/stores.js').UsageLedger = {
+      reserve: async ({ tenantId, estimatedCostUsd }) => { reservedFor.push(tenantId); return { id: 'reservation', tenantId, estimatedCostUsd }; },
+      reconcile: async () => {},
+    };
+    app = await buildApp(
+      { host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, apiCredentials: [{ id: 'project-a', tenantId: 'tenant-a', keySha256: sha256ApiKey('tenant-secret'), scopes: ['responses:create'] }] },
+      { usage },
+    );
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer tenant-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(response.statusCode).toBe(200);
+    expect(reservedFor).toEqual(['tenant-a']);
+  });
+
+  it('rejects caller-controlled tenant identities and missing scopes', async () => {
+    const base = { host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' as const, requestTimeoutMs: 60_000, providerMaxRetries: 0 };
+    app = await buildApp({ ...base, apiCredentials: [{ id: 'project-a', tenantId: 'tenant-a', keySha256: sha256ApiKey('tenant-secret'), scopes: ['responses:create'] }] });
+    const mismatch = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer tenant-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }], policy: { tenantId: 'tenant-b' } } });
+    expect(mismatch.statusCode).toBe(403);
+    expect(mismatch.json().error.code).toBe('authorization_error');
+    await app.close();
+
+    app = await buildApp({ ...base, apiCredentials: [{ id: 'read-only', tenantId: 'tenant-a', keySha256: sha256ApiKey('read-only-secret'), scopes: [] }] });
+    const forbidden = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer read-only-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.json().error.code).toBe('authorization_error');
+  });
+
+  it('fails closed when production has no authentication configuration', async () => {
+    await expect(buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'production', requestTimeoutMs: 60_000, providerMaxRetries: 0 })).rejects.toThrow('Production requires');
   });
 
   it('never rate-limits health endpoints', async () => {

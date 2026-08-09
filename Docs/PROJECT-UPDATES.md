@@ -66,3 +66,12 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files: Request JSON schema, in-memory metrics, HTTP and metrics regression tests.
 - Validation: TypeScript lint, focused regression tests, full test suite, and production build.
 - Follow-up: This closes both unresolved P1 findings from PR #6; production metrics export remains part of the observability milestone.
+
+## 2026-08-09 - Tenant-safe API admission
+
+- Change: Added tenant-scoped API credentials configured as SHA-256 digests, scope checks, production fail-closed startup, and credential-derived billing identity. A caller can no longer select another tenant through `policy.tenantId`.
+- Impact: Authentication and billing now share one trusted tenant identity. Existing `COSMY_API_KEY` deployments keep a documented migration path to digested credentials.
+- Files: Security module, configuration, HTTP admission, startup composition, environment example, tests, and tenant security guide.
+- Validation: Authentication/configuration tests, HTTP trust-boundary tests, TypeScript lint, full test suite, and production build.
+- Migration: Configure `COSMY_API_CREDENTIALS` before the next production restart. Use `ALLOW_UNAUTHENTICATED=true` only as an explicit emergency override.
+- Follow-up: Durable key rotation, OAuth/workload identity, and administrative audit events remain control-plane work.
