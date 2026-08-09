@@ -17,6 +17,8 @@ export interface AppConfig {
   apiCredentials?: readonly ApiCredential[];
   allowUnauthenticated?: boolean;
   idempotencyTtlSeconds?: number;
+  reservationLeaseSeconds?: number;
+  reconciliationSweepSeconds?: number;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -34,6 +36,12 @@ function positiveEnv(value: string | undefined): number | undefined {
 function positiveIntegerEnv(value: string | undefined, fallback: number): number {
   const parsed = numberEnv(value, fallback);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Expected a positive integer, received '${value}'`);
+  return parsed;
+}
+
+function nonNegativeIntegerEnv(value: string | undefined, fallback: number): number {
+  const parsed = numberEnv(value, fallback);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`Expected a non-negative integer, received '${value}'`);
   return parsed;
 }
 
@@ -85,5 +93,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(apiCredentials ? { apiCredentials } : {}),
     allowUnauthenticated: booleanEnv(env.ALLOW_UNAUTHENTICATED, !production),
     idempotencyTtlSeconds: positiveIntegerEnv(env.IDEMPOTENCY_TTL_SECONDS, 86_400),
+    reservationLeaseSeconds: positiveIntegerEnv(env.RESERVATION_LEASE_SECONDS, 300),
+    reconciliationSweepSeconds: nonNegativeIntegerEnv(env.RECONCILIATION_SWEEP_SECONDS, 30),
   };
 }

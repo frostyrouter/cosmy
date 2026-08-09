@@ -124,6 +124,10 @@ export class RequestExecutor {
     const started = performance.now();
     let actualCostUsd = 0;
     let completed = false;
+    const heartbeat = this.usage.heartbeat
+      ? setInterval(() => { void this.usage.heartbeat?.(reservation).catch(() => undefined); }, 30_000)
+      : undefined;
+    heartbeat?.unref();
     try {
       for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal })) {
         yield { ...chunk, requestId };
@@ -144,7 +148,10 @@ export class RequestExecutor {
       if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
       throw error;
-    } finally { await this.reconcileBestEffort(reservation, completed ? actualCostUsd : 0); }
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
+      await this.reconcileBestEffort(reservation, completed ? actualCostUsd : 0);
+    }
   }
 }
 

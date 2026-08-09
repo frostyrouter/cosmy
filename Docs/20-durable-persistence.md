@@ -16,6 +16,12 @@ Caching and distributed coordination are deliberately deferred. The current runt
 
 Reconciliation uses one data-modifying CTE. It marks an active reservation reconciled and moves its estimate from `reserved_usd` to actual `spent_usd`; a repeated reconciliation finds no active row and cannot double-charge.
 
+## Crash recovery
+
+Every reservation has a renewable lease. Normal provider completion reconciles actual cost; streaming execution renews its lease every 30 seconds. Startup and the periodic recovery sweep lock expired rows with `SKIP LOCKED`, charge their original estimate conservatively, and release reserved capacity. This favors budget safety over undercounting when a process dies after provider execution but before actual usage is stored.
+
+`RESERVATION_LEASE_SECONDS` defaults to 300 and is automatically raised to at least the request timeout plus 30 seconds. `RECONCILIATION_SWEEP_SECONDS` defaults to 30; zero disables the periodic sweep but startup recovery still runs. Rows record `reconciliation_source` as `runtime` or `lease-expiry` for audit and correction workflows.
+
 ## Migration path
 
 Startup applies numbered SQL files in lexical order inside one transaction protected by a PostgreSQL advisory lock. `schema_migrations` stores each file's SHA-256 checksum. Editing an already-applied migration fails startup; add a new numbered migration instead.
@@ -25,6 +31,7 @@ Startup applies numbered SQL files in lexical order inside one transaction prote
 | Apply migration | Transaction rolls back; startup fails. | Yes, with the unchanged file. |
 | Reserve budget | Transaction rolls back; request fails. | Yes, subject to an idempotency key at the API layer. |
 | Reconcile usage | Only an unreconciled row can change totals. | Yes. |
+| Recover expired lease | Charge estimate once and release reserved balance. | Yes; concurrent workers use row locks. |
 | Change budget | Upserts one tenant row. | Yes. |
 
 The SQL migrations are a production-safe baseline, not a claim that every deployment should use the same indexes or retention periods. Load testing and tenant-level access patterns should determine partitioning, archival, and query plans.

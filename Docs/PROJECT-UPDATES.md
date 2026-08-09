@@ -10,7 +10,15 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Files: HTTP admission, router service, persistence contracts/adapters, migration 003, configuration, integration CI, tests, and the retry/cache operator guide.
 - Validation: Unit and HTTP concurrency tests, migration coverage, TypeScript lint, production build, and real PostgreSQL/Docker integration.
 - Migration: Deploy migration 003 before using idempotency on PostgreSQL. Configure `IDEMPOTENCY_TTL_SECONDS` to cover the client retry window; default is 24 hours.
-- Follow-up: Durable background reconciliation and administrative audit APIs remain in the next control-plane milestone.
+- Follow-up: Administrative audit APIs remain in the next control-plane milestone.
+
+## 2026-08-09 - Reservation crash recovery
+
+- Change: Added renewable reservation leases, streaming heartbeats, startup recovery, and periodic PostgreSQL sweeps using `FOR UPDATE SKIP LOCKED`. Expired work is charged at its reserved estimate and tagged `lease-expiry`.
+- Impact: A router crash or persistent reconciliation failure can no longer reserve tenant capacity forever. Multiple router instances may sweep safely without double settlement.
+- Validation: Unit/configuration tests plus real PostgreSQL lease-expiry, heartbeat, and concurrent accounting integration tests.
+- Operations: Keep `RESERVATION_LEASE_SECONDS` above the longest ordinary non-streaming request; Cosmy enforces request timeout plus 30 seconds as a floor. Alert on lease-expiry reconciliation because it indicates uncertain actual provider cost.
+- Follow-up: Add an authenticated correction/audit workflow for operators who later recover authoritative provider usage.
 
 ## 2026-08-08 - Update tracking established
 

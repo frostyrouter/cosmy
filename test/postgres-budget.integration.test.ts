@@ -39,4 +39,21 @@ describe.skipIf(!databaseUrl)('PostgreSQL budget integration', () => {
     expect(await repository.usageFor('tenant-a')).toEqual({ reservedUsd: 0, spentUsd: 0.004 });
     await expect(repository.reserve({ tenantId: 'tenant-a', estimatedCostUsd: 0.006 })).resolves.toBeTruthy();
   });
+
+  it('conservatively charges and releases an abandoned reservation', async () => {
+    const reservation = await repository.reserve({ tenantId: 'tenant-a', estimatedCostUsd: 0.007 });
+    await db.query("UPDATE usage_reservations SET lease_expires_at = now() - interval '1 second' WHERE reservation_id = $1", [reservation.id]);
+    await expect(repository.reconcileExpired()).resolves.toBe(1);
+    expect(await repository.usageFor('tenant-a')).toEqual({ reservedUsd: 0, spentUsd: 0.007 });
+    const row = await db.query<{ reconciliation_source: string }>('SELECT reconciliation_source FROM usage_reservations WHERE reservation_id = $1', [reservation.id]);
+    expect(row.rows[0]?.reconciliation_source).toBe('lease-expiry');
+  });
+
+  it('renews the lease for a live streaming reservation', async () => {
+    const reservation = await repository.reserve({ tenantId: 'tenant-a', estimatedCostUsd: 0.007 });
+    await db.query("UPDATE usage_reservations SET lease_expires_at = now() - interval '1 second' WHERE reservation_id = $1", [reservation.id]);
+    await repository.heartbeat(reservation);
+    await expect(repository.reconcileExpired()).resolves.toBe(0);
+    expect(await repository.usageFor('tenant-a')).toEqual({ reservedUsd: 0.007, spentUsd: 0 });
+  });
 });

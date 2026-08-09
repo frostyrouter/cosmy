@@ -32,4 +32,10 @@ describe('tenant authentication', () => {
     expect(() => loadConfig({ IDEMPOTENCY_TTL_SECONDS: '0' })).toThrow('positive integer');
     expect(() => loadConfig({ IDEMPOTENCY_TTL_SECONDS: '1.5' })).toThrow('positive integer');
   });
+
+  it('validates reservation recovery timing', () => {
+    expect(loadConfig({ RESERVATION_LEASE_SECONDS: '600', RECONCILIATION_SWEEP_SECONDS: '0' })).toMatchObject({ reservationLeaseSeconds: 600, reconciliationSweepSeconds: 0 });
+    expect(() => loadConfig({ RESERVATION_LEASE_SECONDS: '-1' })).toThrow('positive integer');
+    expect(() => loadConfig({ RECONCILIATION_SWEEP_SECONDS: '1.5' })).toThrow('non-negative integer');
+  });
 });

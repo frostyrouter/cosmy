@@ -45,7 +45,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
 }
 
 export class PostgresReservationRepository implements ReservationRepository {
-  constructor(private readonly db: SqlClient, private readonly defaultLimitUsd?: number) {}
+  constructor(private readonly db: SqlClient, private readonly defaultLimitUsd?: number, private readonly leaseSeconds = 300) {}
 
   async reserve(input: { tenantId: string; estimatedCostUsd: number }): Promise<UsageReservation> {
     if (!this.db.transaction) throw new Error('PostgresReservationRepository requires transactional SQL client');
@@ -60,7 +60,7 @@ export class PostgresReservationRepository implements ReservationRepository {
         const updated = await tx.query<BudgetRow>('UPDATE tenant_budgets SET reserved_usd = reserved_usd + $2, updated_at = now() WHERE tenant_id = $1 AND spent_usd + reserved_usd + $2 <= limit_usd RETURNING tenant_id, limit_usd, reserved_usd, spent_usd', [input.tenantId, input.estimatedCostUsd]);
         if (!updated.rows[0]) throw new RouterError('Tenant budget would be exceeded', 'budget_exceeded', 429, false);
       }
-      const result = await tx.query<ReservationRow>('INSERT INTO usage_reservations (reservation_id, tenant_id, estimated_cost_usd) VALUES ($1, $2, $3) RETURNING reservation_id, tenant_id, estimated_cost_usd', [id, input.tenantId, input.estimatedCostUsd]);
+      const result = await tx.query<ReservationRow>("INSERT INTO usage_reservations (reservation_id, tenant_id, estimated_cost_usd, lease_expires_at) VALUES ($1, $2, $3, now() + ($4 * interval '1 second')) RETURNING reservation_id, tenant_id, estimated_cost_usd", [id, input.tenantId, input.estimatedCostUsd, this.leaseSeconds]);
       const row = result.rows[0];
       if (!row) throw new Error('Reservation insert returned no row');
       return { id: row.reservation_id, tenantId: row.tenant_id, estimatedCostUsd: Number(row.estimated_cost_usd) };
@@ -69,9 +69,24 @@ export class PostgresReservationRepository implements ReservationRepository {
 
   async reconcile(reservation: UsageReservation, actualCostUsd: number): Promise<void> {
     await this.db.query(
-      'WITH reconciled AS (UPDATE usage_reservations SET actual_cost_usd = $2, reconciled_at = now() WHERE reservation_id = $1 AND reconciled_at IS NULL RETURNING tenant_id, estimated_cost_usd, actual_cost_usd) UPDATE tenant_budgets AS budgets SET reserved_usd = GREATEST(0, budgets.reserved_usd - reconciled.estimated_cost_usd), spent_usd = budgets.spent_usd + reconciled.actual_cost_usd, updated_at = now() FROM reconciled WHERE budgets.tenant_id = reconciled.tenant_id',
+      "WITH reconciled AS (UPDATE usage_reservations SET actual_cost_usd = $2, reconciled_at = now(), reconciliation_source = 'runtime' WHERE reservation_id = $1 AND reconciled_at IS NULL RETURNING tenant_id, estimated_cost_usd, actual_cost_usd) UPDATE tenant_budgets AS budgets SET reserved_usd = GREATEST(0, budgets.reserved_usd - reconciled.estimated_cost_usd), spent_usd = budgets.spent_usd + reconciled.actual_cost_usd, updated_at = now() FROM reconciled WHERE budgets.tenant_id = reconciled.tenant_id",
       [reservation.id, Math.max(0, actualCostUsd)],
     );
+  }
+
+  async heartbeat(reservation: UsageReservation): Promise<void> {
+    await this.db.query("UPDATE usage_reservations SET lease_expires_at = now() + ($2 * interval '1 second') WHERE reservation_id = $1 AND reconciled_at IS NULL", [reservation.id, this.leaseSeconds]);
+  }
+
+  async reconcileExpired(limit = 100): Promise<number> {
+    if (!this.db.transaction) throw new Error('PostgresReservationRepository requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      const result = await tx.query<{ recovered_count: string | number }>(
+        "WITH candidates AS (SELECT reservation_id FROM usage_reservations WHERE reconciled_at IS NULL AND lease_expires_at <= now() ORDER BY lease_expires_at FOR UPDATE SKIP LOCKED LIMIT $1), reconciled AS (UPDATE usage_reservations AS reservations SET actual_cost_usd = reservations.estimated_cost_usd, reconciled_at = now(), reconciliation_source = 'lease-expiry' FROM candidates WHERE reservations.reservation_id = candidates.reservation_id RETURNING reservations.tenant_id, reservations.estimated_cost_usd), totals AS (SELECT tenant_id, SUM(estimated_cost_usd) AS recovered_usd FROM reconciled GROUP BY tenant_id), budgets AS (UPDATE tenant_budgets SET reserved_usd = GREATEST(0, tenant_budgets.reserved_usd - totals.recovered_usd), spent_usd = tenant_budgets.spent_usd + totals.recovered_usd, updated_at = now() FROM totals WHERE tenant_budgets.tenant_id = totals.tenant_id RETURNING tenant_budgets.tenant_id) SELECT COUNT(*) AS recovered_count FROM reconciled",
+        [limit],
+      );
+      return Number(result.rows[0]?.recovered_count ?? 0);
+    });
   }
 
   async setBudget(tenantId: string, limitUsd: number): Promise<void> {

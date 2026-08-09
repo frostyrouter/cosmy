@@ -16,6 +16,8 @@ export interface ReservationRepository {
   reconcile(reservation: UsageReservation, actualCostUsd: number): Promise<void>;
   usageFor(tenantId: string): Promise<{ reservedUsd: number; spentUsd: number }>;
   setBudget?(tenantId: string, limitUsd: number): Promise<void>;
+  heartbeat?(reservation: UsageReservation): Promise<void>;
+  reconcileExpired?(limit?: number): Promise<number>;
 }
 
 export interface ResponseCache {

@@ -48,13 +48,16 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   }
   const registry = dependencies.registry ?? new InMemoryModelRegistry([...defaultModels, ...configuredModelManifests()]);
   let postgres: PostgresSqlClient | undefined;
+  let reservationRecovery: PostgresReservationRepository | undefined;
   let usage = dependencies.usage;
   if (!usage && config.persistenceMode === 'postgres') {
     if (!config.databaseUrl) throw new Error('DATABASE_URL is required when PERSISTENCE_MODE=postgres');
     postgres = await createPostgresSqlClient(config.databaseUrl);
     try {
       await applyControlPlaneMigration(postgres);
-      usage = new PostgresReservationRepository(postgres, config.tenantBudgetUsd);
+      const minimumLeaseSeconds = Math.ceil(config.requestTimeoutMs / 1_000) + 30;
+      reservationRecovery = new PostgresReservationRepository(postgres, config.tenantBudgetUsd, Math.max(config.reservationLeaseSeconds ?? 300, minimumLeaseSeconds));
+      usage = reservationRecovery;
     } catch (error) {
       await postgres.close();
       throw error;
@@ -80,5 +83,19 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
   registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400), readyCheck, authenticator);
+  if (reservationRecovery) {
+    await reservationRecovery.reconcileExpired();
+    const sweepSeconds = config.reconciliationSweepSeconds ?? 30;
+    if (sweepSeconds > 0) {
+      const recovery = reservationRecovery;
+      const timer = setInterval(() => {
+        void recovery.reconcileExpired().then((count) => {
+          if (count > 0) app.log.warn({ count }, 'reconciled expired usage reservations');
+        }).catch((error: unknown) => app.log.error({ err: error }, 'reservation recovery sweep failed'));
+      }, sweepSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
   return app;
 }
