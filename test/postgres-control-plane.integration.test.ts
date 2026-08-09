@@ -2,6 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyControlPlaneMigrations, createPostgresSqlClient, type PostgresSqlClient } from '../src/persistence/postgres.js';
 import { PostgresControlPlaneStore, PostgresReservationRepository } from '../src/persistence/sql-adapters.js';
 import { defaultModels } from '../src/registry/default-models.js';
+import { buildApp } from '../src/app.js';
+import { sha256ApiKey } from '../src/security/auth.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -49,5 +51,31 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await expect(control.setBudget({ tenantId: 'control-tenant', limitUsd: 0.01, actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'budget_below_usage', statusCode: 409 });
     await reservations.reconcile(reservation, 0);
     await expect(control.listAudit(10)).resolves.toEqual([]);
+  });
+
+  it('converges a second router instance on a committed registry version', async () => {
+    const key = 'control-plane-integration-admin';
+    const config = {
+      host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' as const, requestTimeoutMs: 60_000, providerMaxRetries: 0,
+      persistenceMode: 'postgres' as const, databaseUrl: databaseUrl!, registryRefreshSeconds: 1,
+      apiCredentials: [{ id: 'control-admin', tenantId: 'platform', keySha256: sha256ApiKey(key), scopes: ['admin:write' as const] }],
+    };
+    const first = await buildApp(config);
+    const second = await buildApp(config);
+    try {
+      const published = await first.inject({ method: 'PUT', url: '/v1/admin/models', headers: { authorization: `Bearer ${key}` }, payload: { source: 'two-instance-test', models: [defaultModels[0]] } });
+      expect(published.statusCode).toBe(200);
+      let observedSource = '';
+      const deadline = Date.now() + 4_000;
+      while (Date.now() < deadline && observedSource !== 'two-instance-test') {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const snapshot = await second.inject({ method: 'GET', url: '/v1/admin/models', headers: { authorization: `Bearer ${key}` } });
+        observedSource = snapshot.json().source;
+      }
+      expect(observedSource).toBe('two-instance-test');
+    } finally {
+      await first.close();
+      await second.close();
+    }
   });
 });
