@@ -19,4 +19,13 @@ describe('usage ledger', () => {
     await ledger.reconcile(reservation, 0.004);
     await expect(ledger.reserve({ tenantId: 'other-tenant', estimatedCostUsd: 0.005 })).resolves.toBeTruthy();
   });
+
+  it('rejects an administrative limit below existing usage', async () => {
+    const ledger = new InMemoryUsageLedger();
+    const reservation = await ledger.reserve({ tenantId: 'acme', estimatedCostUsd: 0.006 });
+    await expect(ledger.setBudget('acme', 0.005)).rejects.toMatchObject({ code: 'budget_below_usage', statusCode: 409 });
+    expect((await ledger.budgetFor('acme')).limitUsd).toBeUndefined();
+    await ledger.reconcile(reservation, 0.004);
+    await expect(ledger.setBudget('acme', 0.003)).rejects.toMatchObject({ code: 'budget_below_usage', statusCode: 409 });
+  });
 });

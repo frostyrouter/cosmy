@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { defaultModels } from '../src/registry/default-models.js';
 import { sha256ApiKey } from '../src/security/auth.js';
+import { InMemoryUsageLedger } from '../src/stores/memory-usage-ledger.js';
 
 const adminKey = 'admin-secret';
 const responseKey = 'response-secret';
@@ -47,6 +48,15 @@ describe('administrative HTTP API', () => {
     expect(blocked.json().error.code).toBe('budget_exceeded');
     const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit', headers: adminHeaders });
     expect(audit.json().events[0]).toMatchObject({ action: 'budget.set', target: 'tenant:tenant-a' });
+  });
+
+  it('returns 409 when a memory limit is below current usage', async () => {
+    const usage = new InMemoryUsageLedger();
+    await usage.reserve({ tenantId: 'tenant-a', estimatedCostUsd: 0.01 });
+    app = await buildApp(config, { usage });
+    const response = await app.inject({ method: 'PUT', url: '/v1/admin/tenants/tenant-a/budget', headers: { authorization: `Bearer ${adminKey}` }, payload: { limitUsd: 0.005 } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('budget_below_usage');
   });
 
   it('rejects malformed manifests and tenant identifiers', async () => {

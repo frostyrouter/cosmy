@@ -40,6 +40,9 @@ export class InMemoryUsageLedger implements UsageLedger, BudgetAdministration {
 
   async setBudget(tenantId: string, limitUsd: number): Promise<BudgetSnapshot> {
     if (!Number.isFinite(limitUsd) || limitUsd < 0) throw new Error('Budget limit must be a non-negative number');
+    if (limitUsd < this.reservedFor(tenantId) + this.spentFor(tenantId)) {
+      throw new RouterError('Budget limit cannot be lower than current usage', 'budget_below_usage', 409, false);
+    }
     this.limits[tenantId] = limitUsd;
     return this.budgetFor(tenantId);
   }
