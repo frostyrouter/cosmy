@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { ModelConfiguration } from '../domain/types.js';
+import type { ModelConfiguration, ResponseResult } from '../domain/types.js';
 import type { RegistrySnapshot, UsageReservation } from '../ports/stores.js';
-import type { RegistryRepository, ReservationRepository } from './contracts.js';
+import type { IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
@@ -15,6 +15,7 @@ interface ManifestRow { model_id: string; manifest: ModelConfiguration; }
 interface ReservationRow { reservation_id: string; tenant_id: string; estimated_cost_usd: string | number; }
 interface UsageTotalsRow { reserved_usd: string | number; spent_usd: string | number; }
 interface BudgetRow { tenant_id: string; limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; }
+interface IdempotencyRow { request_hash: string; status: 'processing' | 'completed'; response_json: ResponseResult | null; }
 
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
@@ -82,5 +83,39 @@ export class PostgresReservationRepository implements ReservationRepository {
     const result = await this.db.query<UsageTotalsRow>('SELECT COALESCE(SUM(CASE WHEN reconciled_at IS NULL THEN estimated_cost_usd ELSE 0 END), 0) AS reserved_usd, COALESCE(SUM(CASE WHEN reconciled_at IS NOT NULL THEN actual_cost_usd ELSE 0 END), 0) AS spent_usd FROM usage_reservations WHERE tenant_id = $1', [tenantId]);
     const row = result.rows[0];
     return { reservedUsd: Number(row?.reserved_usd ?? 0), spentUsd: Number(row?.spent_usd ?? 0) };
+  }
+}
+
+export class PostgresIdempotencyStore implements IdempotencyStore {
+  private claims = 0;
+
+  constructor(private readonly db: SqlClient) {}
+
+  async claim(tenantId: string, key: string, requestHash: string, ttlSeconds: number): Promise<IdempotencyClaim> {
+    this.claims += 1;
+    if (this.claims % 256 === 0) {
+      await this.db.query('DELETE FROM idempotency_records WHERE ctid IN (SELECT ctid FROM idempotency_records WHERE expires_at <= now() LIMIT 1000)');
+    }
+    await this.db.query('DELETE FROM idempotency_records WHERE tenant_id = $1 AND idempotency_key = $2 AND expires_at <= now()', [tenantId, key]);
+    const inserted = await this.db.query<IdempotencyRow>(
+      "INSERT INTO idempotency_records (tenant_id, idempotency_key, request_hash, status, expires_at) VALUES ($1, $2, $3, 'processing', now() + ($4 * interval '1 second')) ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING request_hash, status, response_json",
+      [tenantId, key, requestHash, ttlSeconds],
+    );
+    if (inserted.rows[0]) return { status: 'claimed' };
+    const existing = await this.db.query<IdempotencyRow>('SELECT request_hash, status, response_json FROM idempotency_records WHERE tenant_id = $1 AND idempotency_key = $2', [tenantId, key]);
+    const row = existing.rows[0];
+    if (!row) return this.claim(tenantId, key, requestHash, ttlSeconds);
+    if (row.request_hash !== requestHash) return { status: 'conflict' };
+    if (row.status === 'completed' && row.response_json) return { status: 'replay', response: row.response_json };
+    return { status: 'in-progress' };
+  }
+
+  async complete(tenantId: string, key: string, requestHash: string, response: ResponseResult): Promise<void> {
+    const updated = await this.db.query<IdempotencyRow>("UPDATE idempotency_records SET status = 'completed', response_json = $4, updated_at = now() WHERE tenant_id = $1 AND idempotency_key = $2 AND request_hash = $3 AND status = 'processing' RETURNING request_hash, status, response_json", [tenantId, key, requestHash, JSON.stringify(response)]);
+    if (!updated.rows[0]) throw new Error('Idempotency claim was not available for completion');
+  }
+
+  async release(tenantId: string, key: string, requestHash: string): Promise<void> {
+    await this.db.query("DELETE FROM idempotency_records WHERE tenant_id = $1 AND idempotency_key = $2 AND request_hash = $3 AND status = 'processing'", [tenantId, key, requestHash]);
   }
 }

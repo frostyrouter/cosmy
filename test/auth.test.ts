@@ -26,4 +26,10 @@ describe('tenant authentication', () => {
     expect(loadConfig({ TENANT_BUDGET_USD: '0' }).tenantBudgetUsd).toBeUndefined();
     expect(() => loadConfig({ TENANT_BUDGET_USD: '-1' })).toThrow('non-negative');
   });
+
+  it('requires a positive whole-second idempotency retention period', () => {
+    expect(loadConfig({ IDEMPOTENCY_TTL_SECONDS: '3600' }).idempotencyTtlSeconds).toBe(3600);
+    expect(() => loadConfig({ IDEMPOTENCY_TTL_SECONDS: '0' })).toThrow('positive integer');
+    expect(() => loadConfig({ IDEMPOTENCY_TTL_SECONDS: '1.5' })).toThrow('positive integer');
+  });
 });

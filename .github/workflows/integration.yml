@@ -23,7 +23,7 @@ jobs:
       - run: npm ci
       - run: docker compose -f docker-compose.integration.yml up -d --build
       - run: node scripts/integration-smoke.mjs
-      - run: npx vitest run test/postgres-budget.integration.test.ts --testTimeout=15000
+      - run: npx vitest run test/*.integration.test.ts --testTimeout=15000
         env:
           DATABASE_URL: postgresql://cosmy:cosmy@localhost:55432/cosmy
       - if: always()

@@ -1,4 +1,4 @@
-import type { ModelConfiguration, Usage } from '../domain/types.js';
+import type { ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
 import type { ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 
 export interface RegistryRepository {
@@ -22,6 +22,18 @@ export interface ResponseCache {
   get(key: string): Promise<{ value: string; expiresAt: string } | undefined>;
   set(key: string, value: string, ttlSeconds: number): Promise<void>;
   delete(key: string): Promise<void>;
+}
+
+export type IdempotencyClaim =
+  | { status: 'claimed' }
+  | { status: 'replay'; response: ResponseResult }
+  | { status: 'conflict' }
+  | { status: 'in-progress' };
+
+export interface IdempotencyStore {
+  claim(tenantId: string, key: string, requestHash: string, ttlSeconds: number): Promise<IdempotencyClaim>;
+  complete(tenantId: string, key: string, requestHash: string, response: ResponseResult): Promise<void>;
+  release(tenantId: string, key: string, requestHash: string): Promise<void>;
 }
 
 export interface UsageRecord {

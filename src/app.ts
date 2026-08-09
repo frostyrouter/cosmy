@@ -17,8 +17,9 @@ import type { ProviderAdapter } from './ports/provider.js';
 import type { HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
 import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
-import { PostgresReservationRepository } from './persistence/sql-adapters.js';
+import { PostgresIdempotencyStore, PostgresReservationRepository } from './persistence/sql-adapters.js';
 import { InMemoryResponseCache } from './persistence/memory-cache.js';
+import { InMemoryIdempotencyStore } from './persistence/memory-idempotency.js';
 import { sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
 
 export interface AppDependencies {
@@ -29,6 +30,7 @@ export interface AppDependencies {
   metrics?: MetricsSink;
   cache?: import('./persistence/contracts.js').ResponseCache;
   authenticator?: RequestAuthenticator;
+  idempotency?: import('./persistence/contracts.js').IdempotencyStore;
 }
 
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
@@ -76,6 +78,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
       }
     : undefined;
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion), readyCheck, authenticator);
+  const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400), readyCheck, authenticator);
   return app;
 }

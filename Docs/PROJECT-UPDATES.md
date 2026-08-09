@@ -2,6 +2,16 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-09 - Tenant-safe retries and cache boundaries
+
+- Change: Added tenant-scoped idempotency claims for non-streaming responses, with bounded memory storage and durable PostgreSQL replay through migration 003. Duplicate in-flight work is blocked, changed requests cannot reuse a key, and a result-storage outage keeps the claim instead of risking duplicate execution and billing.
+- Change: Response caching now permits only public/internal, zero-temperature, tool-free requests. Confidential, restricted, creative, and tool-using work bypasses cache storage and lookup.
+- Impact: Clients can safely retry ambiguous non-streaming failures across router instances, while sensitive or nondeterministic responses cannot be accidentally reused by the optimization cache.
+- Files: HTTP admission, router service, persistence contracts/adapters, migration 003, configuration, integration CI, tests, and the retry/cache operator guide.
+- Validation: Unit and HTTP concurrency tests, migration coverage, TypeScript lint, production build, and real PostgreSQL/Docker integration.
+- Migration: Deploy migration 003 before using idempotency on PostgreSQL. Configure `IDEMPOTENCY_TTL_SECONDS` to cover the client retry window; default is 24 hours.
+- Follow-up: Durable background reconciliation and administrative audit APIs remain in the next control-plane milestone.
+
 ## 2026-08-08 - Update tracking established
 
 - Change: Added the repository rule requiring implementation updates for every feature or change, with a consolidated entry at least every two merged pull requests.

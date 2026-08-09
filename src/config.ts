@@ -16,6 +16,7 @@ export interface AppConfig {
   apiKey?: string;
   apiCredentials?: readonly ApiCredential[];
   allowUnauthenticated?: boolean;
+  idempotencyTtlSeconds?: number;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -28,6 +29,12 @@ function positiveEnv(value: string | undefined): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`Expected a non-negative number, received '${value}'`);
   return parsed > 0 ? parsed : undefined;
+}
+
+function positiveIntegerEnv(value: string | undefined, fallback: number): number {
+  const parsed = numberEnv(value, fallback);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Expected a positive integer, received '${value}'`);
+  return parsed;
 }
 
 function booleanEnv(value: string | undefined, fallback: boolean): boolean {
@@ -77,5 +84,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.COSMY_API_KEY ? { apiKey: env.COSMY_API_KEY } : {}),
     ...(apiCredentials ? { apiCredentials } : {}),
     allowUnauthenticated: booleanEnv(env.ALLOW_UNAUTHENTICATED, !production),
+    idempotencyTtlSeconds: positiveIntegerEnv(env.IDEMPOTENCY_TTL_SECONDS, 86_400),
   };
 }

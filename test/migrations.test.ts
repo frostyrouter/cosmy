@@ -16,6 +16,7 @@ describe('managed database migrations', () => {
     expect(queries[0]).toContain('pg_advisory_xact_lock');
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS usage_reservations'))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS tenant_budgets'))).toBe(true);
-    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(2);
+    expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS idempotency_records'))).toBe(true);
+    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(3);
   });
 });

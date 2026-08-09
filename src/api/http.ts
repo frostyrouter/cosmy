@@ -32,6 +32,14 @@ function tenantRequest(input: ResponseRequest, principal: RequestPrincipal | und
   return { ...input, policy: { ...input.policy, tenantId } };
 }
 
+function idempotencyKey(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value) || !/^[A-Za-z0-9._:-]{1,128}$/u.test(value)) {
+    throw new RouterError('Idempotency-Key must contain 1-128 safe characters', 'invalid_request', 400);
+  }
+  return value;
+}
+
 export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator): void {
   app.setErrorHandler((error: FastifyError, _request, reply) => {
     if (error.validation || (error.statusCode !== undefined && error.statusCode < 500)) {
@@ -49,8 +57,11 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
   app.post('/v1/responses', { schema: { body: responseRequestJsonSchema, response: { 200: responseResultJsonSchema } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const submitted = request.body as unknown as ResponseRequest;
     let input: ResponseRequest;
+    let requestKey: string | undefined;
     try {
       input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator));
+      requestKey = idempotencyKey(request.headers['idempotency-key']);
+      if (input.stream && requestKey) throw new RouterError('Idempotency-Key is not supported for streaming requests', 'invalid_request', 400);
     } catch (error) {
       const normalized = errorBody(error, submitted.requestId);
       return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
@@ -75,7 +86,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
         }
         return;
       }
-      return reply.send(await service.complete(input, controller.signal));
+      return reply.send(await service.complete(input, controller.signal, requestKey));
     } catch (error) {
       request.log.warn({ err: error }, 'request failed');
       const normalized = errorBody(error, input.requestId);

@@ -23,6 +23,12 @@ The documentation deliberately separates product intent from implementation deta
 15. [Alternatives and trade-offs](14-alternatives.md)
 16. [Contribution and release policy](CONTRIBUTING.md)
 
+## Fast operator guides
+
+- [Durable persistence and budgets](20-durable-persistence.md)
+- [Tenant security](21-tenant-security.md)
+- [Safe retries and response caching](22-idempotency-and-cache.md)
+
 ## Decision status vocabulary
 
 - **Accepted**: implementation should follow the decision unless superseded by an ADR.
