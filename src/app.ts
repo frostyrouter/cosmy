@@ -52,7 +52,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     postgres = await createPostgresSqlClient(config.databaseUrl);
     try {
       await applyControlPlaneMigration(postgres);
-      usage = new PostgresReservationRepository(postgres);
+      usage = new PostgresReservationRepository(postgres, config.tenantBudgetUsd);
     } catch (error) {
       await postgres.close();
       throw error;

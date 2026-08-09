@@ -75,3 +75,12 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Validation: Authentication/configuration tests, HTTP trust-boundary tests, TypeScript lint, full test suite, and production build.
 - Migration: Configure `COSMY_API_CREDENTIALS` before the next production restart. Use `ALLOW_UNAUTHENTICATED=true` only as an explicit emergency override.
 - Follow-up: Durable key rotation, OAuth/workload identity, and administrative audit events remain control-plane work.
+
+## 2026-08-09 - Atomic PostgreSQL budgets and managed migrations
+
+- Change: Added tenant budget rows, transactional conditional reservations, idempotent reconciliation totals, and a zero-means-unlimited configuration fix. Startup now applies numbered migrations under an advisory lock and rejects checksum drift.
+- Impact: Concurrent router instances cannot overspend a configured PostgreSQL tenant budget through a check-then-insert race. Schema changes are ordered, recorded, and safe to retry.
+- Files: PostgreSQL client and repositories, migration 002, configuration, unit/integration tests, integration CI, and persistence guide.
+- Validation: Mock contract tests, real PostgreSQL concurrent reservation tests, full test suite, build, and Docker Compose smoke.
+- Migration: Existing databases re-run idempotent migration 001 once to establish checksums, then apply migration 002. Never edit a migration after deployment.
+- Follow-up: Add durable reconciliation jobs and budget administration/audit APIs in the control-plane milestone.

@@ -21,4 +21,9 @@ describe('tenant authentication', () => {
     expect(() => loadConfig({ COSMY_API_CREDENTIALS: 'not-json' })).toThrow('valid JSON');
     expect(() => new StaticApiKeyAuthenticator([{ id: 'bad', tenantId: 'tenant', keySha256: 'plaintext', scopes: ['responses:create'] }])).toThrow('invalid SHA-256');
   });
+
+  it('treats a zero tenant budget as unlimited and rejects invalid negatives', () => {
+    expect(loadConfig({ TENANT_BUDGET_USD: '0' }).tenantBudgetUsd).toBeUndefined();
+    expect(() => loadConfig({ TENANT_BUDGET_USD: '-1' })).toThrow('non-negative');
+  });
 });

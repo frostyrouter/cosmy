@@ -23,6 +23,13 @@ function numberEnv(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function positiveEnv(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`Expected a non-negative number, received '${value}'`);
+  return parsed > 0 ? parsed : undefined;
+}
+
 function booleanEnv(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   if (value === 'true') return true;
@@ -53,6 +60,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   const production = environment === 'production';
   const apiCredentials = credentialsEnv(env.COSMY_API_CREDENTIALS);
+  const tenantBudgetUsd = positiveEnv(env.TENANT_BUDGET_USD);
   return {
     host: env.HOST ?? '0.0.0.0',
     port: numberEnv(env.PORT, 8080),
@@ -65,7 +73,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cacheMode: env.CACHE_MODE === 'memory' ? 'memory' : 'off',
     responseCacheTtlSeconds: numberEnv(env.RESPONSE_CACHE_TTL_SECONDS, 60),
     ...(env.RATE_LIMIT_MAX ? { rateLimitMax: numberEnv(env.RATE_LIMIT_MAX, 0) } : {}),
-    ...(env.TENANT_BUDGET_USD ? { tenantBudgetUsd: numberEnv(env.TENANT_BUDGET_USD, 0) } : {}),
+    ...(tenantBudgetUsd !== undefined ? { tenantBudgetUsd } : {}),
     ...(env.COSMY_API_KEY ? { apiKey: env.COSMY_API_KEY } : {}),
     ...(apiCredentials ? { apiCredentials } : {}),
     allowUnauthenticated: booleanEnv(env.ALLOW_UNAUTHENTICATED, !production),
