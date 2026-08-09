@@ -8,6 +8,7 @@ import { DeterministicRouter } from '../src/routing/router.js';
 import { RequestExecutor } from '../src/execution/executor.js';
 import { SimulatorProvider } from '../src/providers/simulator.js';
 import type { ProviderAdapter } from '../src/ports/provider.js';
+import { InMemoryMetrics } from '../src/observability/metrics.js';
 
 describe('usage reconciliation', () => {
   it('releases the reservation when a provider fails', async () => {
@@ -38,10 +39,12 @@ describe('usage reconciliation', () => {
     const ledger = { reserve: async () => ({ id: 'r1', tenantId: 'default', estimatedCostUsd: 0.001 }), reconcile: async () => { throw new Error('store unavailable'); } } as unknown as import('../src/ports/stores.js').UsageLedger;
     const health = new InMemoryHealthStore();
     const providers: ProviderAdapter[] = [{ name: 'simulator', listModels: () => defaultModels, complete: async () => ({ output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }), stream: async function* () {} }];
-    const executor = new RequestExecutor(providers, ledger, health);
+    const metrics = new InMemoryMetrics();
+    const executor = new RequestExecutor(providers, ledger, health, metrics);
     const result = await executor.execute({ requestId: 'req_reconcile', route, request: { messages: [{ role: 'user', content: 'hello' }] }, signal: new AbortController().signal });
     expect(result.output).toBe('ok');
     expect(health.stats(route.selected.model.id)).toEqual({ successes: 1, failures: 0 });
+    expect(metrics.snapshot().operational.reconciliation_failure).toBe(1);
   });
 
   it('preserves the provider error when reconciliation fails on the error path', async () => {

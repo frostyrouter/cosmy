@@ -12,6 +12,7 @@ import { resilientProviders } from './execution/resilience.js';
 import { RouterService } from './service/router-service.js';
 import { registerRoutes } from './api/http.js';
 import { registerAdminRoutes } from './api/admin-http.js';
+import { registerMetricsRoute } from './api/metrics-http.js';
 import { InMemoryMetrics } from './observability/metrics.js';
 import { loadConfig, type AppConfig } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
@@ -90,6 +91,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   }
   const health = dependencies.health ?? new InMemoryHealthStore();
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
+  registerMetricsRoute(app, metrics, authenticator);
   const router = new DeterministicRouter(registry);
   const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
   const providerAdapters = dependencies.providers ?? providers;
@@ -102,7 +104,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     : undefined;
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400), readyCheck, authenticator);
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics), readyCheck, authenticator);
   if (registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))) {
     const controlStore = postgres ? new PostgresControlPlaneStore(postgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration);
     registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name))), authenticator);
@@ -115,7 +117,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
       const timer = setInterval(() => {
         void repository.getCurrent().then((snapshot) => {
           if (snapshot && snapshot.version > durableRegistry.currentSnapshot().version) durableRegistry.load(snapshot);
-        }).catch((error: unknown) => app.log.error({ err: error }, 'registry refresh failed'));
+        }).catch((error: unknown) => { metrics.increment?.('registry_refresh_failure'); app.log.error({ err: error }, 'registry refresh failed'); });
       }, refreshSeconds * 1_000);
       timer.unref();
       app.addHook('onClose', async () => { clearInterval(timer); });
@@ -129,6 +131,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
       const timer = setInterval(() => {
         void recovery.reconcileExpired().then((count) => {
           if (count > 0) app.log.warn({ count }, 'reconciled expired usage reservations');
+          if (count > 0) metrics.increment?.('reservation_recovered', count);
         }).catch((error: unknown) => app.log.error({ err: error }, 'reservation recovery sweep failed'));
       }, sweepSeconds * 1_000);
       timer.unref();

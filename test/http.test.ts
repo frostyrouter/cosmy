@@ -4,6 +4,7 @@ import { InMemoryResponseCache } from '../src/persistence/memory-cache.js';
 import { sha256ApiKey } from '../src/security/auth.js';
 import { SimulatorProvider } from '../src/providers/simulator.js';
 import { defaultModels } from '../src/registry/default-models.js';
+import { InMemoryMetrics } from '../src/observability/metrics.js';
 
 describe('HTTP API', () => {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
@@ -38,7 +39,8 @@ describe('HTTP API', () => {
 
   it('serves repeated completions from the configured response cache', async () => {
     const cache = new InMemoryResponseCache();
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, cacheMode: 'memory', responseCacheTtlSeconds: 60 }, { cache });
+    const metrics = new InMemoryMetrics();
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, cacheMode: 'memory', responseCacheTtlSeconds: 60 }, { cache, metrics });
     const payload = { messages: [{ role: 'user', content: 'cache this response' }] };
     const first = await app.inject({ method: 'POST', url: '/v1/responses', payload });
     const second = await app.inject({ method: 'POST', url: '/v1/responses', payload });
@@ -46,6 +48,7 @@ describe('HTTP API', () => {
     expect(second.statusCode).toBe(200);
     expect(second.json().output).toBe(first.json().output);
     expect(second.json().requestId).not.toBe(first.json().requestId);
+    expect(metrics.snapshot().operational.cache_hit).toBe(1);
   });
 
   it('rejects unknown request fields and invalid messages', async () => {
@@ -84,11 +87,13 @@ describe('HTTP API', () => {
       complete: async () => { throw new Error('database unavailable'); },
       release: async () => { releases += 1; },
     };
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 }, { idempotency });
+    const metrics = new InMemoryMetrics();
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 }, { idempotency, metrics });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', headers: { 'idempotency-key': 'store-failure' }, payload: { messages: [{ role: 'user', content: 'bill once' }] } });
     expect(response.statusCode).toBe(503);
     expect(response.json().error.code).toBe('idempotency_store_error');
     expect(releases).toBe(0);
+    expect(metrics.snapshot().operational.idempotency_store_failure).toBe(1);
   });
 
   it('blocks concurrent duplicate execution', async () => {
@@ -145,11 +150,13 @@ describe('HTTP API', () => {
   });
 
   it('serves stream chunks as SSE events', async () => {
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    const metrics = new InMemoryMetrics();
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 }, { metrics });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'hello world' }] } });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/event-stream');
     expect(response.body).toContain('event: done');
+    expect(metrics.snapshot()).toMatchObject({ activeStreams: 0, successes: 1 });
   });
 
   it('reports unready when the readiness check fails', async () => {

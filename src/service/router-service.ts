@@ -5,6 +5,7 @@ import { DeterministicRouter } from '../routing/router.js';
 import { RequestExecutor } from '../execution/executor.js';
 import { RouterError } from '../domain/errors.js';
 import type { IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
+import type { MetricsSink } from '../observability/metrics.js';
 
 function cacheKey(request: ResponseRequest, policyVersion: string | undefined, registryVersion: number | undefined): string {
   const normalized = { ...request, requestId: undefined, stream: false };
@@ -43,6 +44,7 @@ export class RouterService {
     private readonly getRegistryVersion?: () => number | undefined,
     private readonly idempotency?: IdempotencyStore,
     private readonly idempotencyTtlSeconds = 86_400,
+    private readonly metrics?: MetricsSink,
   ) {}
 
   async complete(request: ResponseRequest, signal: AbortSignal, idempotencyKey?: string): Promise<ResponseResult> {
@@ -53,6 +55,7 @@ export class RouterService {
     try {
       claim = await this.idempotency.claim(tenantId, idempotencyKey, hash, this.idempotencyTtlSeconds);
     } catch {
+      this.metrics?.increment?.('idempotency_store_failure');
       throw new RouterError('Unable to claim the idempotency key', 'idempotency_store_error', 503, true);
     }
     if (claim.status === 'replay') return claim.response;
@@ -69,6 +72,7 @@ export class RouterService {
       await this.idempotency.complete(tenantId, idempotencyKey, hash, response);
     } catch {
       // Keep the processing claim: releasing it could execute and bill the request twice.
+      this.metrics?.increment?.('idempotency_store_failure');
       throw new RouterError('Unable to persist the idempotent response', 'idempotency_store_error', 503, true);
     }
     return response;
@@ -83,12 +87,13 @@ export class RouterService {
     try {
       const cached = await cache.get(key);
       if (cached) {
+        this.metrics?.increment?.('cache_hit');
         const result = JSON.parse(cached.value) as ResponseResult;
         return { ...result, requestId: id, route: { ...result.route, requestId: id } };
       }
-    } catch { /* Cache failures must not take down provider execution. */ }
+    } catch { this.metrics?.increment?.('cache_failure'); }
     const result = await this.executor.execute({ requestId: id, route, request, signal });
-    try { await cache.set(key, JSON.stringify(result), this.cacheTtlSeconds); } catch { /* Cache failures are fail-open. */ }
+    try { await cache.set(key, JSON.stringify(result), this.cacheTtlSeconds); } catch { this.metrics?.increment?.('cache_failure'); }
     return result;
   }
 

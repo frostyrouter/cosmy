@@ -2,6 +2,15 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-10 - Bounded operational metrics
+
+- Change: Added an authenticated Prometheus text endpoint with a dedicated `metrics:read` scope, provider/model/status attempt counters, token/cost totals, active streams, fallback and latency signals, and operational failure counters.
+- Safety: Provider/model cardinality is capped at 512 with overflow aggregation. Metrics exclude tenant/request/credential IDs, prompts, outputs, metadata, keys, and arbitrary error text; labels are escaped.
+- Diagnostics: Persistent usage reconciliation failures, idempotency-store failures, cache outcomes, registry-refresh failures, and recovered reservation counts now produce explicit counters.
+- Validation: Prometheus rendering/cardinality/privacy tests, scope tests, reconciliation diagnostics, full unit/build validation, and Docker HTTP smoke.
+- Operations: Issue a separate scraper credential and alert first on reconciliation, idempotency, registry refresh, and recovery events.
+- Follow-up: Dashboards, long-term storage, and distributed traces remain deployment integrations; OpenTelemetry is deliberately not a runtime dependency.
+
 ## 2026-08-10 - Audited administrative control plane
 
 - Change: Added `admin:read` and `admin:write` scopes plus authenticated APIs for immutable model-snapshot publication, tenant budget reads/writes, and audit-event reads.
