@@ -11,6 +11,7 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Boundary: Shadow duplication is intentionally deferred until separate budgets, privacy/redaction, side-effect suppression, asynchronous comparison, and evaluator integrity exist.
 - Follow-up: Windowed p95/error gates, quality and cost deltas, shadow evaluation, staged percentage changes, and automatic promotion policy remain.
 - Review hardening: Rollout observation waits are capped at 100 ms, preventing a stalled control-plane query from hanging an already completed response or SSE stream; timeout is surfaced as an operational failure metric.
+- Review hardening: Observation SQL is isolated in a four-connection bulkhead with server lock/statement and client query deadlines, so timed-out rollout work cannot exhaust the primary persistence pool.
 
 ## 2026-08-10 - Evidence-backed model promotion
 

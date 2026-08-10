@@ -53,6 +53,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     throw new Error('Production requires COSMY_API_CREDENTIALS or explicit ALLOW_UNAUTHENTICATED=true');
   }
   let postgres: PostgresSqlClient | undefined;
+  let rolloutPostgres: PostgresSqlClient | undefined;
   let registryRepository: PostgresRegistryRepository | undefined;
   let reservationRecovery: PostgresReservationRepository | undefined;
   let reservationHeartbeatMs = 30_000;
@@ -61,11 +62,12 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     postgres = await createPostgresSqlClient(config.databaseUrl);
     try {
       await applyControlPlaneMigration(postgres);
+      rolloutPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 100, queryTimeoutMs: 200, connectionTimeoutMs: 200 });
     } catch (error) {
       await postgres.close();
       throw error;
     }
-    app.addHook('onClose', async () => { await postgres?.close(); });
+    app.addHook('onClose', async () => { await rolloutPostgres?.close(); await postgres?.close(); });
   }
   const seedModels = [...defaultModels, ...configuredModelManifests()];
   let registry = dependencies.registry;
@@ -98,7 +100,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const providerAdapters = dependencies.providers ?? providers;
   const rolloutRegistry = new InMemoryRolloutRegistry();
   const controlStore: ControlPlaneStore | undefined = registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))
-    ? postgres ? new PostgresControlPlaneStore(postgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
+    ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
     : undefined;
   if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
   const router = new DeterministicRouter(registry, undefined, rolloutRegistry);

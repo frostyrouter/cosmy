@@ -39,8 +39,15 @@ class TransactionClient implements SqlClient {
   }
 }
 
-export async function createPostgresSqlClient(connectionString: string): Promise<PostgresSqlClient> {
-  const pool = new Pool({ connectionString, max: 20, idleTimeoutMillis: 30_000 });
+export interface PostgresClientOptions { maxConnections?: number; statementTimeoutMs?: number; queryTimeoutMs?: number; connectionTimeoutMs?: number; }
+
+export async function createPostgresSqlClient(connectionString: string, options: PostgresClientOptions = {}): Promise<PostgresSqlClient> {
+  const pool = new Pool({
+    connectionString, max: options.maxConnections ?? 20, idleTimeoutMillis: 30_000,
+    ...(options.statementTimeoutMs !== undefined ? { statement_timeout: options.statementTimeoutMs } : {}),
+    ...(options.queryTimeoutMs !== undefined ? { query_timeout: options.queryTimeoutMs } : {}),
+    ...(options.connectionTimeoutMs !== undefined ? { connectionTimeoutMillis: options.connectionTimeoutMs } : {}),
+  });
   const client = await pool.connect();
   client.release();
   return new PostgresSqlClient(pool);

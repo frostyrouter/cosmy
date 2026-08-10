@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PostgresRegistryRepository, PostgresReservationRepository, type SqlClient } from '../src/persistence/sql-adapters.js';
+import { PostgresControlPlaneStore, PostgresRegistryRepository, PostgresReservationRepository, type SqlClient } from '../src/persistence/sql-adapters.js';
 import { defaultModels } from '../src/registry/default-models.js';
 
 describe('durable persistence adapters', () => {
@@ -30,6 +30,21 @@ describe('durable persistence adapters', () => {
     const reservation = await repository.reserve({ tenantId: 'acme', estimatedCostUsd: 0.01 });
     await repository.reconcile(reservation, 0.004);
     expect(await repository.usageFor('acme')).toEqual({ reservedUsd: 0, spentUsd: 0.004 });
+  });
+
+  it('isolates rollout observations on their dedicated SQL client with server deadlines', async () => {
+    const queries: string[] = [];
+    const primary: SqlClient = { query: async () => { throw new Error('primary pool must not be used'); } };
+    const rollout: SqlClient = {
+      query: async <Row>(text: string) => {
+        queries.push(text);
+        const rows = text.startsWith('UPDATE model_rollouts') ? [{ id: 'r1', model_id: 'candidate', model_version: '2', state: 'canary', traffic_percentage: 5, minimum_samples: 20, maximum_error_rate: 0.1, maximum_average_latency_ms: 1000, sample_count: '1', error_count: '0', total_latency_ms: 20, reason: null, created_at: '2026-08-10T00:00:00Z', updated_at: '2026-08-10T00:00:01Z' }] : [];
+        return { rows: rows as Row[] };
+      },
+      transaction: async (work) => work(rollout),
+    };
+    await expect(new PostgresControlPlaneStore(primary, rollout).recordRolloutOutcome({ modelId: 'candidate', modelVersion: '2', status: 'success', latencyMs: 20 })).resolves.toMatchObject({ sampleCount: 1 });
+    expect(queries).toEqual(expect.arrayContaining([expect.stringContaining('statement_timeout'), expect.stringContaining('lock_timeout'), expect.stringContaining('UPDATE model_rollouts')]));
   });
 
   it('enforces a tenant budget inside the reservation transaction', async () => {

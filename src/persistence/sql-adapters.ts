@@ -160,7 +160,7 @@ function modelRollout(row: RolloutRow): ModelRollout {
 const rolloutColumns = 'id, model_id, model_version, state, traffic_percentage, minimum_samples, maximum_error_rate, maximum_average_latency_ms, sample_count, error_count, total_latency_ms, reason, created_at, updated_at';
 
 export class PostgresControlPlaneStore implements ControlPlaneStore {
-  constructor(private readonly db: SqlClient) {}
+  constructor(private readonly db: SqlClient, private readonly rolloutDb: SqlClient = db) {}
 
   async publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
     if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
@@ -276,11 +276,13 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
 
   async recordRolloutOutcome(outcome: RolloutOutcome): Promise<ModelRollout | undefined> {
     if (outcome.status === 'cancelled') {
-      const current = await this.db.query<RolloutRow>(`SELECT ${rolloutColumns} FROM model_rollouts WHERE model_id = $1 AND model_version = $2 AND state = 'canary' ORDER BY created_at DESC LIMIT 1`, [outcome.modelId, outcome.modelVersion]);
+      const current = await this.rolloutDb.query<RolloutRow>(`SELECT ${rolloutColumns} FROM model_rollouts WHERE model_id = $1 AND model_version = $2 AND state = 'canary' ORDER BY created_at DESC LIMIT 1`, [outcome.modelId, outcome.modelVersion]);
       return current.rows[0] ? modelRollout(current.rows[0]) : undefined;
     }
-    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
-    return this.db.transaction(async (tx) => {
+    if (!this.rolloutDb.transaction) throw new Error('PostgresControlPlaneStore rollout observations require transactional SQL client');
+    return this.rolloutDb.transaction(async (tx) => {
+      await tx.query("SET LOCAL statement_timeout = '100ms'");
+      await tx.query("SET LOCAL lock_timeout = '75ms'");
       const failed = outcome.status === 'error' ? 1 : 0;
       const result = await tx.query<RolloutRow>(`UPDATE model_rollouts SET sample_count = sample_count + 1, error_count = error_count + $3, total_latency_ms = total_latency_ms + $4, state = CASE WHEN sample_count + 1 >= minimum_samples AND (((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate OR ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms) THEN 'rolled_back' ELSE state END, reason = CASE WHEN sample_count + 1 >= minimum_samples AND ((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate THEN 'error_rate_exceeded' WHEN sample_count + 1 >= minimum_samples AND ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms THEN 'average_latency_exceeded' ELSE reason END, updated_at = now() WHERE model_id = $1 AND model_version = $2 AND state = 'canary' RETURNING ${rolloutColumns}`, [outcome.modelId, outcome.modelVersion, failed, Math.max(0, outcome.latencyMs)]);
       const row = result.rows[0]; if (!row) return undefined;
