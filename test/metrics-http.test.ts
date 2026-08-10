@@ -24,6 +24,7 @@ describe('Prometheus metrics endpoint', () => {
     const allowed = await app.inject({ method: 'GET', url: '/metrics', headers: { authorization: `Bearer ${metricsKey}` } });
     expect(missing.statusCode).toBe(401);
     expect(ordinary.statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/v1/admin/diagnostics', headers: { authorization: `Bearer ${metricsKey}` } })).statusCode).toBe(403);
     expect(allowed.statusCode).toBe(200);
     expect(allowed.headers['content-type']).toContain('text/plain');
     expect(allowed.body).toContain('cosmy_provider_attempts_total{provider="simulator"');

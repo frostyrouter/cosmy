@@ -12,7 +12,7 @@ import { resilientProviders } from './execution/resilience.js';
 import { RouterService } from './service/router-service.js';
 import { registerRoutes } from './api/http.js';
 import { registerAdminRoutes } from './api/admin-http.js';
-import { registerMetricsRoute } from './api/metrics-http.js';
+import { registerDiagnosticsRoute, registerMetricsRoute } from './api/metrics-http.js';
 import { InMemoryMetrics } from './observability/metrics.js';
 import { loadConfig, type AppConfig } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
@@ -105,6 +105,17 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
   registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics), readyCheck, authenticator);
+  registerDiagnosticsRoute(app, async () => {
+    const current = (registry as { currentSnapshot?: () => { version: number; source: string; createdAt: string } }).currentSnapshot?.();
+    const models = registry.snapshot();
+    const ready = readyCheck ? await readyCheck() : true;
+    return {
+      status: ready ? 'ready' : 'unready',
+      registry: { ...(current ?? {}), modelCount: models.length, enabledModelCount: models.filter((model) => model.enabled).length },
+      persistence: postgres ? 'postgres' : 'memory',
+      metrics: metrics.snapshot(),
+    };
+  }, authenticator);
   if (registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))) {
     const controlStore = postgres ? new PostgresControlPlaneStore(postgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration);
     registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name))), authenticator);

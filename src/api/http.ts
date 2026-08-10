@@ -42,8 +42,11 @@ function idempotencyKey(value: string | string[] | undefined): string | undefine
 
 export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator): void {
   app.setErrorHandler((error: FastifyError, _request, reply) => {
-    if (error.validation || (error.statusCode !== undefined && error.statusCode < 500)) {
+    if (error.validation) {
       return reply.code(400).send({ error: { code: 'invalid_request', message: error.message } });
+    }
+    if (error.statusCode !== undefined && error.statusCode < 500) {
+      return reply.code(error.statusCode).send({ error: { code: error.statusCode === 429 ? 'rate_limit_exceeded' : 'invalid_request', message: error.message } });
     }
     return reply.code(error.statusCode ?? 500).send({ error: { code: 'internal_error', message: 'An unexpected error occurred' } });
   });

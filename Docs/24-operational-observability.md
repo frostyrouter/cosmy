@@ -13,6 +13,8 @@ The credential needs `metrics:read`; `admin:read` and `admin:write` also work. R
 
 The response uses Prometheus text format 0.0.4 and requires no external telemetry SDK. Each router instance exposes its own process-local counters; the monitoring system sums counters and treats gauges per instance.
 
+Operators with `admin:read` may also call `GET /v1/admin/diagnostics`. It returns readiness, persistence mode, active registry version/source/model counts, and the safe aggregate metrics snapshot as JSON. It returns 503 when the database readiness check fails and never includes configuration secrets or tenant/request content.
+
 ## Exported signals
 
 | Metric | Type | Labels / meaning |

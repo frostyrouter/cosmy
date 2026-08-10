@@ -229,6 +229,15 @@ describe('HTTP API', () => {
     expect(statuses).toEqual([200, 200, 200, 200, 200]);
   });
 
+  it('preserves HTTP 429 for an exceeded rate limit', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0, rateLimitMax: 1 });
+    const request = { method: 'POST' as const, url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'hello' }] } };
+    expect((await app.inject(request)).statusCode).toBe(200);
+    const limited = await app.inject(request);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().error.code).toBe('rate_limit_exceeded');
+  });
+
   it('returns a 504 timeout when the request deadline expires over HTTP', async () => {
     const model = { id: 'slow', provider: 'slow', model: 'slow', version: '1', enabled: true, capabilities: [], modalities: ['text' as const], coordinates: { technicality: 0.5, creativity: 0.5, quality: 0.5, reasoning: 0.5 }, pricing: { inputPerMillionUsd: 0.1, outputPerMillionUsd: 0.3 }, contextWindow: 16_000, maxOutputTokens: 4_000, regions: ['global'], allowedDataClasses: ['public' as const, 'internal' as const], health: { availability: 1, latencyP95Ms: 10, errorRate: 0, checkedAt: 'test' } };
     const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
