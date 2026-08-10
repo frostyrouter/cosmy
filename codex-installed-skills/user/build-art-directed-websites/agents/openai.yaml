@@ -1,4 +1,0 @@
-interface:
-  display_name: "Art-Directed Websites"
-  short_description: "Concept-led websites with tactile interactions"
-  default_prompt: "Use $build-art-directed-websites to design and build a distinctive, responsive website with a strong visual thesis and playful interactions."
