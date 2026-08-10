@@ -3,6 +3,7 @@ import { RouterError } from '../domain/errors.js';
 import type { ControlPlaneStore } from '../persistence/contracts.js';
 import type { InMemoryModelRegistry } from '../registry/memory-registry.js';
 import type { RequestPrincipal } from '../security/auth.js';
+import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from './promotion.js';
 
 export class ControlPlaneService {
   constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>) {}
@@ -21,6 +22,14 @@ export class ControlPlaneService {
       ids.add(model.id);
     }
     if (enabled === 0) throw new RouterError('A registry snapshot must contain at least one enabled model', 'invalid_request', 400, false);
+    for (const model of models) {
+      const current = this.registry.get(model.id);
+      if (hasModelVersionConflict(current, model)) throw new RouterError(`Model '${model.id}' version '${model.version}' is immutable; publish material changes under a new version`, 'model_version_conflict', 409, false);
+      if (!needsPromotionEvidence(current, model)) continue;
+      const evidence = await this.store.evidenceFor(model.id, model.version);
+      const reasons = assessPromotion(model, evidence);
+      if (reasons.length) throw new RouterError(`Model '${model.id}' failed promotion gates: ${reasons.join(', ')}`, 'promotion_gate_failed', 409, false);
+    }
     const snapshot = await this.store.publishModels({ models, source, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
     return this.registry.load(snapshot);
   }
@@ -32,4 +41,20 @@ export class ControlPlaneService {
   }
 
   listAudit(limit: number) { return this.store.listAudit(limit); }
+
+  submitEvidence(evidence: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'>, actor: RequestPrincipal) {
+    return this.store.submitEvidence({ ...evidence, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+  }
+
+  evidenceFor(modelId: string, modelVersion: string) { return this.store.evidenceFor(modelId, modelVersion); }
+
+  async assessCandidate(model: ModelConfiguration) {
+    const current = this.registry.get(model.id);
+    if (hasModelVersionConflict(current, model)) return { required: true, eligible: false, reasons: ['model_version_conflict'] };
+    const required = needsPromotionEvidence(current, model);
+    if (!required) return { required, eligible: true, reasons: [] as string[] };
+    const evidence = await this.store.evidenceFor(model.id, model.version);
+    const reasons = assessPromotion(model, evidence);
+    return { required, eligible: reasons.length === 0, reasons, ...(evidence ? { evidence } : {}) };
+  }
 }

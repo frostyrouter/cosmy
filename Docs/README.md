@@ -30,6 +30,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Safe retries and response caching](22-idempotency-and-cache.md)
 - [Control-plane operations](23-control-plane-operations.md)
 - [Operational observability](24-operational-observability.md)
+- [Model promotion gates](25-model-promotion-gates.md)
 
 ## Decision status vocabulary
 

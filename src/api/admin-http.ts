@@ -6,7 +6,7 @@ import type { ControlPlaneService } from '../control-plane/service.js';
 import type { ApiScope, RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
 
 const modelSchema = z.object({
-  id: z.string().min(1).max(128), provider: z.string().min(1).max(64), model: z.string().min(1).max(128), version: z.string().min(1).max(64), enabled: z.boolean(),
+  id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/u), provider: z.string().min(1).max(64), model: z.string().min(1).max(128), version: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/u), enabled: z.boolean(),
   capabilities: z.array(z.enum(['streaming', 'tools', 'structured-output', 'vision', 'reasoning'])).max(5),
   modalities: z.array(z.enum(['text', 'image', 'audio', 'video', 'file'])).min(1).max(5),
   coordinates: z.object({ technicality: z.number().min(0).max(1), creativity: z.number().min(0).max(1), quality: z.number().min(0).max(1), reasoning: z.number().min(0).max(1) }).strict(),
@@ -21,6 +21,13 @@ const publishSchema = z.object({ source: z.string().min(1).max(200), models: z.a
 const budgetSchema = z.object({ limitUsd: z.number().nonnegative().max(1_000_000_000) }).strict();
 const tenantSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).strict();
+const evidenceSchema = z.object({
+  modelId: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/u), modelVersion: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/u),
+  suiteVersion: z.string().min(1).max(128), datasetVersion: z.string().min(1).max(128),
+  conformancePassed: z.boolean(), pricingVerified: z.boolean(), usageVerified: z.boolean(),
+  routingPassRate: z.number().min(0).max(1), qualityScore: z.number().min(0).max(1), sampleCount: z.number().int().nonnegative(),
+  evaluatedAt: z.string().datetime(), expiresAt: z.string().datetime(),
+}).strict();
 
 function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): RequestPrincipal {
   const principal = authenticator?.authenticate(authorization);
@@ -69,6 +76,31 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
       requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const query = auditQuerySchema.parse(request.query);
       return { events: await service.listAudit(query.limit) };
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/model-evidence', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      return reply.code(201).send(await service.submitEvidence(evidenceSchema.parse(request.body), actor));
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get('/v1/admin/model-evidence', async (request, reply) => {
+    try {
+      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      const query = evidenceSchema.pick({ modelId: true, modelVersion: true }).parse(request.query);
+      const { modelId, modelVersion } = query;
+      const evidence = await service.evidenceFor(modelId, modelVersion);
+      if (!evidence) return reply.code(404).send({ error: { code: 'not_found', message: 'Model promotion evidence was not found' } });
+      return evidence;
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/model-promotion-assessments', async (request, reply) => {
+    try {
+      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      return await service.assessCandidate(modelSchema.parse(request.body) as ModelConfiguration);
     } catch (error) { return sendError(reply, error); }
   });
 }
