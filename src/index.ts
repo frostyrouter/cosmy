@@ -19,5 +19,6 @@ export * from './persistence/memory-idempotency.js';
 export * from './control-plane/service.js';
 export * from './control-plane/memory-store.js';
 export * from './control-plane/promotion.js';
+export * from './rollouts/rollout.js';
 export * from './persistence/sql-adapters.js';
 export * from './security/auth.js';

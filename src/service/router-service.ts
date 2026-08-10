@@ -7,9 +7,9 @@ import { RouterError } from '../domain/errors.js';
 import type { IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
 import type { MetricsSink } from '../observability/metrics.js';
 
-function cacheKey(request: ResponseRequest, policyVersion: string | undefined, registryVersion: number | undefined): string {
+function cacheKey(request: ResponseRequest, policyVersion: string | undefined, registryVersion: number | undefined, modelId: string, modelVersion: string): string {
   const normalized = { ...request, requestId: undefined, stream: false };
-  const versioned = `${policyVersion ?? 'unknown'}|${registryVersion ?? 'unknown'}|${canonicalJson(normalized)}`;
+  const versioned = `${policyVersion ?? 'unknown'}|${registryVersion ?? 'unknown'}|${modelId}@${modelVersion}|${canonicalJson(normalized)}`;
   return createHash('sha256').update(versioned).digest('hex');
 }
 
@@ -83,7 +83,7 @@ export class RouterService {
     const route = this.router.decide(id, request);
     const cache = this.cache;
     if (!cache || this.cacheTtlSeconds <= 0 || !cacheEligible(request)) return this.executor.execute({ requestId: id, route, request, signal });
-    const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.());
+    const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.(), route.selected.model.id, route.selected.model.version);
     try {
       const cached = await cache.get(key);
       if (cached) {
