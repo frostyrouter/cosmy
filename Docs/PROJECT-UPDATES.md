@@ -2,6 +2,15 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-10 - Evidence-backed model promotion
+
+- Change: Added immutable model-version evidence records, audited submission/read APIs, non-mutating promotion assessment, and active-publication gates for newly enabled IDs or versions.
+- Gates: Conformance, pricing, usage accounting, routing pass rate, quality, sample count, exact identity, clock validity, and freshness must all pass. Disabled and unchanged active versions remain backward-compatible.
+- Consistency: PostgreSQL re-checks current versions and latest evidence under a registry publication lock in the same transaction that writes the snapshot and audit event.
+- Impact: New models join the routing graph through validated metadata and evidence publication; the router does not require retraining.
+- Validation: Deterministic gate-reason tests, HTTP workflow tests, managed migration checks, full unit/build validation, and real PostgreSQL evidence/publication tests.
+- Follow-up: Signed evaluator evidence, separation of duties, shadow/canary traffic, automatic rollback, and deprecation automation remain lifecycle milestones.
+
 ## 2026-08-10 - Bounded operational metrics
 
 - Change: Added an authenticated Prometheus text endpoint with a dedicated `metrics:read` scope, plus an admin diagnostics endpoint containing readiness, persistence, registry, and aggregate runtime state. Signals include provider/model/status attempt counters, token/cost totals, active streams, fallback and latency data, and operational failure counters.

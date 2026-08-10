@@ -79,4 +79,34 @@ describe('administrative HTTP API', () => {
     expect(response.statusCode).toBe(400);
     expect(response.json().error.message).toContain('unavailable provider');
   });
+
+  it('requires fresh evidence before enabling a new model version', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const model = { ...structuredClone(defaultModels[0]!), id: 'sim/candidate', version: '2' };
+    const publish = () => app!.inject({ method: 'PUT', url: '/v1/admin/models', headers, payload: { source: 'promotion-test', models: [...defaultModels, model] } });
+    const missing = await publish();
+    expect(missing.statusCode).toBe(409);
+    expect(missing.json().error.code).toBe('promotion_gate_failed');
+    const failedEvidence = await app.inject({ method: 'POST', url: '/v1/admin/model-evidence', headers, payload: {
+      modelId: model.id, modelVersion: model.version, suiteVersion: 'routing-v1', datasetVersion: 'too-small-v1', conformancePassed: true,
+      pricingVerified: true, usageVerified: true, routingPassRate: 0.99, qualityScore: 0.9, sampleCount: 10,
+      evaluatedAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    } });
+    expect(failedEvidence.statusCode).toBe(201);
+    const failedAssessment = await app.inject({ method: 'POST', url: '/v1/admin/model-promotion-assessments', headers, payload: model });
+    expect(failedAssessment.json()).toMatchObject({ eligible: false, reasons: ['sample_count_below_gate', 'evidence_expired'] });
+    expect((await publish()).statusCode).toBe(409);
+    const evidence = await app.inject({ method: 'POST', url: '/v1/admin/model-evidence', headers, payload: {
+      modelId: model.id, modelVersion: model.version, suiteVersion: 'routing-v1', datasetVersion: 'standard-v1', conformancePassed: true,
+      pricingVerified: true, usageVerified: true, routingPassRate: 0.99, qualityScore: 0.9, sampleCount: 200,
+      evaluatedAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    } });
+    expect(evidence.statusCode).toBe(201);
+    const assessment = await app.inject({ method: 'POST', url: '/v1/admin/model-promotion-assessments', headers, payload: model });
+    expect(assessment.json()).toMatchObject({ required: true, eligible: true, reasons: [] });
+    expect((await publish()).statusCode).toBe(200);
+    const read = await app.inject({ method: 'GET', url: `/v1/admin/model-evidence?modelId=${encodeURIComponent(model.id)}&modelVersion=${encodeURIComponent(model.version)}`, headers });
+    expect(read.json()).toMatchObject({ modelId: model.id, modelVersion: model.version, submittedByCredentialId: 'admin' });
+  });
 });

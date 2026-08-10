@@ -21,6 +21,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
 
   beforeEach(async () => {
     await db.query("DELETE FROM admin_audit_events WHERE actor_credential_id = 'control-admin'");
+    await db.query("DELETE FROM model_promotion_evidence WHERE submitted_by_credential_id = 'control-admin'");
     await db.query('DELETE FROM model_manifests');
     await db.query('DELETE FROM model_registry_snapshots');
     await db.query("DELETE FROM usage_reservations WHERE tenant_id = 'control-tenant'");
@@ -29,11 +30,21 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
   afterAll(async () => { await db?.close(); });
 
   it('atomically publishes a snapshot and its actor audit record', async () => {
+    await control.submitEvidence({ modelId: defaultModels[0]!.id, modelVersion: defaultModels[0]!.version, suiteVersion: 'suite-1', datasetVersion: 'dataset-1', conformancePassed: true, pricingVerified: true, usageVerified: true, routingPassRate: 0.99, qualityScore: 0.9, sampleCount: 200, evaluatedAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(), actorCredentialId: 'control-admin', actorTenantId: 'platform' });
     const snapshot = await control.publishModels({ models: defaultModels.slice(0, 1), source: 'integration', actorCredentialId: 'control-admin', actorTenantId: 'platform' });
     expect(snapshot).toMatchObject({ source: 'integration' });
-    await expect(control.listAudit(10)).resolves.toEqual([
+    await expect(control.listAudit(10)).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ actorCredentialId: 'control-admin', actorTenantId: 'platform', action: 'models.publish', target: `registry:${snapshot.version}` }),
-    ]);
+      expect.objectContaining({ action: 'model_evidence.submit', target: `model:${defaultModels[0]!.id}@${defaultModels[0]!.version}` }),
+    ]));
+  });
+
+  it('rejects a new enabled version without passing evidence', async () => {
+    const candidate = { ...structuredClone(defaultModels[0]!), id: 'postgres-candidate', version: '2' };
+    await expect(control.publishModels({ models: [candidate], source: 'missing-evidence', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'promotion_gate_failed', statusCode: 409 });
+    expect(await control.evidenceFor(candidate.id, candidate.version)).toBeUndefined();
+    expect((await db.query<{ count: string }>('SELECT COUNT(*) AS count FROM model_registry_snapshots')).rows[0]?.count).toBe('0');
+    await expect(control.listAudit(10)).resolves.toEqual([]);
   });
 
   it('serializes first-time budget creation against reservation admission', async () => {

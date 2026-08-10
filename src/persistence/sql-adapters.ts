@@ -3,6 +3,7 @@ import type { ModelConfiguration, ResponseResult } from '../domain/types.js';
 import type { BudgetSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 import type { AuditEvent, ControlPlaneStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
+import { assessPromotion, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
 export interface SqlClient {
@@ -17,6 +18,7 @@ interface UsageTotalsRow { reserved_usd: string | number; spent_usd: string | nu
 interface BudgetRow { tenant_id: string; limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; }
 interface IdempotencyRow { request_hash: string; status: 'processing' | 'completed'; response_json: ResponseResult | null; }
 interface AuditRow { id: string; actor_credential_id: string; actor_tenant_id: string; action: AuditEvent['action']; target: string; details: Record<string, unknown>; occurred_at: string; }
+interface EvidenceRow { id: string; model_id: string; model_version: string; suite_version: string; dataset_version: string; conformance_passed: boolean; pricing_verified: boolean; usage_verified: boolean; routing_pass_rate: number; quality_score: number; sample_count: number; evaluated_at: string; expires_at: string; submitted_by_credential_id: string; submitted_at: string; }
 
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
@@ -36,6 +38,7 @@ export class PostgresRegistryRepository implements RegistryRepository {
   async publish(models: readonly ModelConfiguration[], source: string): Promise<RegistrySnapshot> {
     if (!this.db.transaction) throw new Error('PostgresRegistryRepository requires transactional SQL client');
     return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:registry-publish'))");
       const inserted = await tx.query<SnapshotRow>('INSERT INTO model_registry_snapshots (source) VALUES ($1) RETURNING version, source, created_at', [source]);
       const row = inserted.rows[0];
       if (!row) throw new Error('Registry snapshot insert returned no row');
@@ -133,12 +136,31 @@ function auditEvent(row: AuditRow): AuditEvent {
   };
 }
 
+function promotionEvidence(row: EvidenceRow): ModelPromotionEvidence {
+  return {
+    id: row.id, modelId: row.model_id, modelVersion: row.model_version, suiteVersion: row.suite_version, datasetVersion: row.dataset_version,
+    conformancePassed: row.conformance_passed, pricingVerified: row.pricing_verified, usageVerified: row.usage_verified,
+    routingPassRate: Number(row.routing_pass_rate), qualityScore: Number(row.quality_score), sampleCount: Number(row.sample_count),
+    evaluatedAt: new Date(row.evaluated_at).toISOString(), expiresAt: new Date(row.expires_at).toISOString(),
+    submittedByCredentialId: row.submitted_by_credential_id, submittedAt: new Date(row.submitted_at).toISOString(),
+  };
+}
+
 export class PostgresControlPlaneStore implements ControlPlaneStore {
   constructor(private readonly db: SqlClient) {}
 
   async publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
     if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
     return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:registry-publish'))");
+      const current = await tx.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = (SELECT MAX(version) FROM model_registry_snapshots)');
+      const currentById = new Map(current.rows.map((entry) => [entry.model_id, entry.manifest]));
+      for (const model of input.models) {
+        if (!needsPromotionEvidence(currentById.get(model.id), model)) continue;
+        const evidence = await this.evidenceForWith(tx, model.id, model.version);
+        const reasons = assessPromotion(model, evidence);
+        if (reasons.length) throw new RouterError(`Model '${model.id}' failed promotion gates: ${reasons.join(', ')}`, 'promotion_gate_failed', 409, false);
+      }
       const inserted = await tx.query<SnapshotRow>('INSERT INTO model_registry_snapshots (source) VALUES ($1) RETURNING version, source, created_at', [input.source]);
       const row = inserted.rows[0];
       if (!row) throw new Error('Registry snapshot insert returned no row');
@@ -179,8 +201,27 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
     return result.rows.map(auditEvent);
   }
 
+  async submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      const id = randomUUID();
+      const result = await tx.query<EvidenceRow>('INSERT INTO model_promotion_evidence (id, model_id, model_version, suite_version, dataset_version, conformance_passed, pricing_verified, usage_verified, routing_pass_rate, quality_score, sample_count, evaluated_at, expires_at, submitted_by_credential_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, model_id, model_version, suite_version, dataset_version, conformance_passed, pricing_verified, usage_verified, routing_pass_rate, quality_score, sample_count, evaluated_at, expires_at, submitted_by_credential_id, submitted_at', [id, input.modelId, input.modelVersion, input.suiteVersion, input.datasetVersion, input.conformancePassed, input.pricingVerified, input.usageVerified, input.routingPassRate, input.qualityScore, input.sampleCount, input.evaluatedAt, input.expiresAt, input.actorCredentialId]);
+      const row = result.rows[0];
+      if (!row) throw new Error('Evidence insert returned no row');
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'model_evidence.submit', `model:${input.modelId}@${input.modelVersion}`, { suiteVersion: input.suiteVersion, datasetVersion: input.datasetVersion, sampleCount: input.sampleCount });
+      return promotionEvidence(row);
+    });
+  }
+
+  evidenceFor(modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined> { return this.evidenceForWith(this.db, modelId, modelVersion); }
+
   private async appendAudit(db: SqlClient, actorCredentialId: string, actorTenantId: string, action: AuditEvent['action'], target: string, details: Record<string, unknown>): Promise<void> {
     await db.query('INSERT INTO admin_audit_events (id, actor_credential_id, actor_tenant_id, action, target, details) VALUES ($1, $2, $3, $4, $5, $6)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
+  }
+
+  private async evidenceForWith(db: SqlClient, modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined> {
+    const result = await db.query<EvidenceRow>('SELECT id, model_id, model_version, suite_version, dataset_version, conformance_passed, pricing_verified, usage_verified, routing_pass_rate, quality_score, sample_count, evaluated_at, expires_at, submitted_by_credential_id, submitted_at FROM model_promotion_evidence WHERE model_id = $1 AND model_version = $2 ORDER BY submitted_at DESC, id DESC LIMIT 1', [modelId, modelVersion]);
+    return result.rows[0] ? promotionEvidence(result.rows[0]) : undefined;
   }
 }
 

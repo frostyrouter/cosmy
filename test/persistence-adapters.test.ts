@@ -12,6 +12,7 @@ describe('durable persistence adapters', () => {
     const result = await new PostgresRegistryRepository(db).publish(defaultModels.slice(0, 1), 'test');
     expect(result.version).toBe(3);
     expect(result.models).toHaveLength(1);
+    expect(queries.some((query) => query.includes('cosmy:registry-publish'))).toBe(true);
     expect(queries.some((query) => query.includes('model_manifests'))).toBe(true);
   });
 

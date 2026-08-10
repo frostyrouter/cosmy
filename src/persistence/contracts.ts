@@ -1,5 +1,6 @@
 import type { ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
 import type { BudgetSnapshot, ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
+import type { ModelPromotionEvidence } from '../control-plane/promotion.js';
 
 export interface RegistryRepository {
   getCurrent(): Promise<RegistrySnapshot | undefined>;
@@ -42,7 +43,7 @@ export interface AuditEvent {
   id: string;
   actorCredentialId: string;
   actorTenantId: string;
-  action: 'models.publish' | 'budget.set';
+  action: 'models.publish' | 'budget.set' | 'model_evidence.submit';
   target: string;
   details: Record<string, unknown>;
   occurredAt: string;
@@ -53,6 +54,8 @@ export interface ControlPlaneStore {
   budgetFor(tenantId: string): Promise<BudgetSnapshot>;
   setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot>;
   listAudit(limit: number): Promise<readonly AuditEvent[]>;
+  submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence>;
+  evidenceFor(modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined>;
 }
 
 export interface UsageRecord {
