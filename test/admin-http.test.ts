@@ -109,4 +109,13 @@ describe('administrative HTTP API', () => {
     const read = await app.inject({ method: 'GET', url: `/v1/admin/model-evidence?modelId=${encodeURIComponent(model.id)}&modelVersion=${encodeURIComponent(model.version)}`, headers });
     expect(read.json()).toMatchObject({ modelId: model.id, modelVersion: model.version, submittedByCredentialId: 'admin' });
   });
+
+  it('rejects material changes that reuse an enabled model version', async () => {
+    app = await buildApp(config);
+    const model = structuredClone(defaultModels[0]!);
+    model.pricing.outputPerMillionUsd += 1;
+    const response = await app.inject({ method: 'PUT', url: '/v1/admin/models', headers: { authorization: `Bearer ${adminKey}` }, payload: { source: 'version-reuse', models: [model, ...defaultModels.slice(1)] } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('model_version_conflict');
+  });
 });

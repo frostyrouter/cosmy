@@ -3,7 +3,7 @@ import type { ModelConfiguration, ResponseResult } from '../domain/types.js';
 import type { BudgetSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 import type { AuditEvent, ControlPlaneStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
-import { assessPromotion, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
+import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
 export interface SqlClient {
@@ -156,7 +156,9 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
       const current = await tx.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = (SELECT MAX(version) FROM model_registry_snapshots)');
       const currentById = new Map(current.rows.map((entry) => [entry.model_id, entry.manifest]));
       for (const model of input.models) {
-        if (!needsPromotionEvidence(currentById.get(model.id), model)) continue;
+        const currentModel = currentById.get(model.id);
+        if (hasModelVersionConflict(currentModel, model)) throw new RouterError(`Model '${model.id}' version '${model.version}' is immutable; publish material changes under a new version`, 'model_version_conflict', 409, false);
+        if (!needsPromotionEvidence(currentModel, model)) continue;
         const evidence = await this.evidenceForWith(tx, model.id, model.version);
         const reasons = assessPromotion(model, evidence);
         if (reasons.length) throw new RouterError(`Model '${model.id}' failed promotion gates: ${reasons.join(', ')}`, 'promotion_gate_failed', 409, false);

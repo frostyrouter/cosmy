@@ -47,6 +47,15 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await expect(control.listAudit(10)).resolves.toEqual([]);
   });
 
+  it('rejects a material change that reuses an enabled version', async () => {
+    await control.submitEvidence({ modelId: defaultModels[0]!.id, modelVersion: defaultModels[0]!.version, suiteVersion: 'suite-1', datasetVersion: 'dataset-1', conformancePassed: true, pricingVerified: true, usageVerified: true, routingPassRate: 0.99, qualityScore: 0.9, sampleCount: 200, evaluatedAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(), actorCredentialId: 'control-admin', actorTenantId: 'platform' });
+    await control.publishModels({ models: defaultModels.slice(0, 1), source: 'initial', actorCredentialId: 'control-admin', actorTenantId: 'platform' });
+    const changed = structuredClone(defaultModels[0]!);
+    changed.allowedDataClasses = ['public'];
+    await expect(control.publishModels({ models: [changed], source: 'version-reuse', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'model_version_conflict', statusCode: 409 });
+    expect((await db.query<{ count: string }>('SELECT COUNT(*) AS count FROM model_registry_snapshots')).rows[0]?.count).toBe('1');
+  });
+
   it('serializes first-time budget creation against reservation admission', async () => {
     const results = await Promise.allSettled([
       control.setBudget({ tenantId: 'control-tenant', limitUsd: 0.01, actorCredentialId: 'control-admin', actorTenantId: 'platform' }),

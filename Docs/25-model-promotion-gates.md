@@ -37,7 +37,7 @@ Evidence may be submitted before the manifest is active. A failed record is reta
 | Freshness | `expiresAt` is in the future and after `evaluatedAt` |
 | Identity | Exact model ID and version match |
 
-Gate failures return `409 promotion_gate_failed` with deterministic reason codes in the message. Disabled candidates need no evidence because they cannot receive traffic. An already enabled unchanged ID/version may be republished, allowing safe registry metadata updates without repeating promotion.
+Gate failures return `409 promotion_gate_failed` with deterministic reason codes in the message. Disabled candidates need no evidence because they cannot receive traffic. Model versions are immutable: changing provider, provider model, capabilities, coordinates, pricing, limits, regions, data classes, or other manifest content under an existing version returns `409 model_version_conflict`. Only an identical enabled ID/version may be republished without fresh evidence.
 
 ## Example evidence
 

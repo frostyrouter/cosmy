@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { ModelConfiguration } from '../domain/types.js';
 
 export interface ModelPromotionEvidence {
@@ -53,4 +54,8 @@ export function assessPromotion(model: ModelConfiguration, evidence: ModelPromot
 
 export function needsPromotionEvidence(current: ModelConfiguration | undefined, candidate: ModelConfiguration): boolean {
   return candidate.enabled && (!current || current.version !== candidate.version || !current.enabled);
+}
+
+export function hasModelVersionConflict(current: ModelConfiguration | undefined, candidate: ModelConfiguration): boolean {
+  return Boolean(current && current.version === candidate.version && !isDeepStrictEqual(current, candidate));
 }

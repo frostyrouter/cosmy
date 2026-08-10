@@ -10,6 +10,7 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Impact: New models join the routing graph through validated metadata and evidence publication; the router does not require retraining.
 - Validation: Deterministic gate-reason tests, HTTP workflow tests, managed migration checks, full unit/build validation, and real PostgreSQL evidence/publication tests.
 - Follow-up: Signed evaluator evidence, separation of duties, shadow/canary traffic, automatic rollback, and deprecation automation remain lifecycle milestones.
+- Review hardening: Enabled model versions are immutable; any same-version manifest change is rejected in both service and transactional PostgreSQL enforcement, closing an evidence-bypass path.
 
 ## 2026-08-10 - Bounded operational metrics
 

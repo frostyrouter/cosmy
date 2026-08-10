@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessPromotion, needsPromotionEvidence, type ModelPromotionEvidence } from '../src/control-plane/promotion.js';
+import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../src/control-plane/promotion.js';
 import { defaultModels } from '../src/registry/default-models.js';
 
 const model = { ...structuredClone(defaultModels[0]!), id: 'candidate', version: '2' };
@@ -15,6 +15,8 @@ describe('model promotion gates', () => {
     expect(needsPromotionEvidence(undefined, model)).toBe(true);
     expect(needsPromotionEvidence(model, model)).toBe(false);
     expect(needsPromotionEvidence({ ...model, enabled: false }, model)).toBe(true);
+    expect(hasModelVersionConflict(model, model)).toBe(false);
+    expect(hasModelVersionConflict(model, { ...model, pricing: { ...model.pricing, outputPerMillionUsd: model.pricing.outputPerMillionUsd + 1 } })).toBe(true);
   });
 
   it('reports every independently failed gate deterministically', () => {
