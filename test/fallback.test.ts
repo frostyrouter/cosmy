@@ -85,6 +85,18 @@ describe('fallback execution and metrics', () => {
     expect(Date.now() - started).toBeLessThan(300);
   });
 
+  it('does not let a stalled rollout observation hang a completed response', async () => {
+    const model = { ...defaultModels[0]!, id: 'observed', provider: 'observed' };
+    const route = new DeterministicRouter(new InMemoryModelRegistry([model])).decide('req_observation', { messages: [{ role: 'user', content: 'hello' }] });
+    const provider: ProviderAdapter = { name: 'observed', listModels: () => [model], complete: async () => ({ output: 'done', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }), stream: async function* () {} };
+    const metrics = new InMemoryMetrics();
+    const executor = new RequestExecutor([provider], new InMemoryUsageLedger(), new InMemoryHealthStore(), metrics, undefined, 30_000, { recordOutcome: () => new Promise<void>(() => {}) });
+    const started = Date.now();
+    await expect(executor.execute({ requestId: 'req_observation', route, request: { messages: [{ role: 'user', content: 'hello' }] }, signal: new AbortController().signal })).resolves.toMatchObject({ output: 'done' });
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(metrics.snapshot().operational.rollout_observation_failure).toBe(1);
+  });
+
   it('records a completed stream as success and reconciles the estimate when usage is missing', async () => {
     const first = { ...defaultModels[0]!, id: 'first', provider: 'first' };
     const registry = new InMemoryModelRegistry([first]);

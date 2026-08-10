@@ -118,4 +118,21 @@ describe('administrative HTTP API', () => {
     expect(response.statusCode).toBe(409);
     expect(response.json().error.code).toBe('model_version_conflict');
   });
+
+  it('starts, reads, and rolls back an audited canary rollout', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const created = await app.inject({ method: 'POST', url: '/v1/admin/model-rollouts', headers, payload: { modelId: defaultModels[0]!.id, modelVersion: defaultModels[0]!.version, trafficPercentage: 10, minimumSamples: 20, maximumErrorRate: 0.05, maximumAverageLatencyMs: 2_000 } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ state: 'canary', trafficPercentage: 10, sampleCount: 0 });
+    const read = await app.inject({ method: 'GET', url: `/v1/admin/model-rollouts/${created.json().id}`, headers });
+    expect(read.json()).toMatchObject({ id: created.json().id, state: 'canary' });
+    const premature = await app.inject({ method: 'POST', url: '/v1/admin/model-rollout-actions', headers, payload: { id: created.json().id, action: 'promote' } });
+    expect(premature.statusCode).toBe(409);
+    expect(premature.json().error.code).toBe('rollout_not_ready');
+    const rolledBack = await app.inject({ method: 'POST', url: '/v1/admin/model-rollout-actions', headers, payload: { id: created.json().id, action: 'rollback', reason: 'operator stopped canary' } });
+    expect(rolledBack.json()).toMatchObject({ state: 'rolled_back', reason: 'operator stopped canary' });
+    const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers });
+    expect(audit.json().events.map((event: { action: string }) => event.action)).toEqual(expect.arrayContaining(['rollout.start', 'rollout.rollback']));
+  });
 });

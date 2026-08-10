@@ -4,6 +4,7 @@ import type { HealthStore, UsageLedger, UsageReservation } from '../ports/stores
 import type { ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
 import { ProviderError, RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { MetricsSink } from '../observability/metrics.js';
+import type { RolloutOutcomeRecorder } from '../rollouts/rollout.js';
 
 export interface ExecutionOptions {
   requestId: string;
@@ -22,6 +23,7 @@ export class RequestExecutor {
     private readonly metrics?: MetricsSink,
     private readonly requestTimeoutMs?: number,
     private readonly reservationHeartbeatMs = 30_000,
+    private readonly rolloutOutcomes?: RolloutOutcomeRecorder,
   ) {
     this.providerByName = new Map(providers.map((provider) => [provider.name, provider]));
   }
@@ -112,12 +114,14 @@ export class RequestExecutor {
       this.health.markSuccess(route.selected.model.id, latencyMs);
       await this.reconcileBestEffort(reservation, response.usage.estimatedCostUsd);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: response.usage, fallbackIndex });
+      await this.recordRolloutOutcome(route.selected.model, 'success', latencyMs);
       return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
       const latencyMs = performance.now() - started;
       if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       await this.reconcileBestEffort(reservation, 0);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs, fallbackIndex });
+      await this.recordRolloutOutcome(route.selected.model, error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs);
       throw error;
     }
   }
@@ -165,6 +169,7 @@ export class RequestExecutor {
             actualCostUsd = reservation.estimatedCostUsd;
             this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, fallbackIndex });
           }
+          await this.recordRolloutOutcome(route.selected.model, 'success', latencyMs);
         }
       }
       if (heartbeatError) throw heartbeatError;
@@ -172,6 +177,7 @@ export class RequestExecutor {
       const executionError = heartbeatError ?? error;
       if (!heartbeatError && !(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: executionError instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
+      await this.recordRolloutOutcome(route.selected.model, executionError instanceof RequestCancelledError ? 'cancelled' : 'error', performance.now() - started);
       throw executionError;
     } finally {
       closed = true;
@@ -192,6 +198,11 @@ export class RequestExecutor {
       } catch (error) { failure = error; }
     }
     throw failure;
+  }
+
+  private async recordRolloutOutcome(model: ModelConfiguration, status: 'success' | 'error' | 'cancelled', latencyMs: number): Promise<void> {
+    if (!this.rolloutOutcomes) return;
+    try { await settleWithin(this.rolloutOutcomes.recordOutcome({ modelId: model.id, modelVersion: model.version, status, latencyMs }), 100); } catch { this.metrics?.increment?.('rollout_observation_failure'); }
   }
 }
 

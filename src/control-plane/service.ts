@@ -4,9 +4,10 @@ import type { ControlPlaneStore } from '../persistence/contracts.js';
 import type { InMemoryModelRegistry } from '../registry/memory-registry.js';
 import type { RequestPrincipal } from '../security/auth.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from './promotion.js';
+import type { InMemoryRolloutRegistry, ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 
 export class ControlPlaneService {
-  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>) {}
+  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry) {}
 
   snapshot() { return this.registry.currentSnapshot(); }
 
@@ -56,5 +57,24 @@ export class ControlPlaneService {
     const evidence = await this.store.evidenceFor(model.id, model.version);
     const reasons = assessPromotion(model, evidence);
     return { required, eligible: reasons.length === 0, reasons, ...(evidence ? { evidence } : {}) };
+  }
+
+  async createRollout(input: Omit<ModelRollout, 'id' | 'state' | 'sampleCount' | 'errorCount' | 'totalLatencyMs' | 'reason' | 'createdAt' | 'updatedAt'>, actor: RequestPrincipal) {
+    const model = this.registry.get(input.modelId);
+    if (!model || !model.enabled || model.version !== input.modelVersion) throw new RouterError('Rollout target must be the exact enabled registry model version', 'invalid_rollout_target', 409, false);
+    const rollout = await this.store.createRollout({ ...input, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    this.rollouts?.upsert(rollout); return rollout;
+  }
+  rollout(id: string) { return this.store.rollout(id); }
+  runtimeRollouts() { return this.store.runtimeRollouts(); }
+  async changeRollout(id: string, action: 'promote' | 'rollback', reason: string | undefined, actor: RequestPrincipal) {
+    const rollout = await this.store.changeRollout({ id, action, ...(reason ? { reason } : {}), actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    this.rollouts?.upsert(rollout); return rollout;
+  }
+  async recordOutcome(outcome: RolloutOutcome): Promise<ModelRollout | undefined> {
+    const before = this.rollouts?.get(outcome.modelId);
+    const rollout = await this.store.recordRolloutOutcome(outcome);
+    if (rollout) this.rollouts?.upsert(rollout);
+    return before?.state === 'canary' && rollout?.state === 'rolled_back' ? rollout : undefined;
   }
 }

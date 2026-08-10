@@ -25,6 +25,8 @@ import { InMemoryIdempotencyStore } from './persistence/memory-idempotency.js';
 import { sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
 import { InMemoryControlPlaneStore } from './control-plane/memory-store.js';
 import { ControlPlaneService } from './control-plane/service.js';
+import { InMemoryRolloutRegistry, type RolloutOutcome } from './rollouts/rollout.js';
+import type { ControlPlaneStore } from './persistence/contracts.js';
 
 export interface AppDependencies {
   registry?: ModelRegistry;
@@ -51,6 +53,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     throw new Error('Production requires COSMY_API_CREDENTIALS or explicit ALLOW_UNAUTHENTICATED=true');
   }
   let postgres: PostgresSqlClient | undefined;
+  let rolloutPostgres: PostgresSqlClient | undefined;
   let registryRepository: PostgresRegistryRepository | undefined;
   let reservationRecovery: PostgresReservationRepository | undefined;
   let reservationHeartbeatMs = 30_000;
@@ -59,11 +62,12 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     postgres = await createPostgresSqlClient(config.databaseUrl);
     try {
       await applyControlPlaneMigration(postgres);
+      rolloutPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 100, queryTimeoutMs: 200, connectionTimeoutMs: 200 });
     } catch (error) {
       await postgres.close();
       throw error;
     }
-    app.addHook('onClose', async () => { await postgres?.close(); });
+    app.addHook('onClose', async () => { await rolloutPostgres?.close(); await postgres?.close(); });
   }
   const seedModels = [...defaultModels, ...configuredModelManifests()];
   let registry = dependencies.registry;
@@ -92,10 +96,24 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const health = dependencies.health ?? new InMemoryHealthStore();
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
   registerMetricsRoute(app, metrics, authenticator);
-  const router = new DeterministicRouter(registry);
   const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
   const providerAdapters = dependencies.providers ?? providers;
-  const executor = new RequestExecutor(providerAdapters, usage, health, metrics, config.requestTimeoutMs, reservationHeartbeatMs);
+  const rolloutRegistry = new InMemoryRolloutRegistry();
+  const controlStore: ControlPlaneStore | undefined = registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))
+    ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
+    : undefined;
+  if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
+  const router = new DeterministicRouter(registry, undefined, rolloutRegistry);
+  const rolloutObserver = controlStore ? {
+    recordOutcome: async (outcome: RolloutOutcome) => {
+      const before = rolloutRegistry.get(outcome.modelId);
+      if (!before || before.state !== 'canary' || before.modelVersion !== outcome.modelVersion) return;
+      const updated = await controlStore.recordRolloutOutcome(outcome);
+      if (updated) rolloutRegistry.upsert(updated);
+      if (before?.state === 'canary' && updated?.state === 'rolled_back') metrics.increment?.('rollout_auto_rollback');
+    },
+  } : undefined;
+  const executor = new RequestExecutor(providerAdapters, usage, health, metrics, config.requestTimeoutMs, reservationHeartbeatMs, rolloutObserver);
   const db = postgres;
   const readyCheck = db
     ? async (): Promise<boolean> => {
@@ -116,9 +134,8 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
       metrics: metrics.snapshot(),
     };
   }, authenticator);
-  if (registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))) {
-    const controlStore = postgres ? new PostgresControlPlaneStore(postgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration);
-    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name))), authenticator);
+  if (controlStore && registry instanceof InMemoryModelRegistry) {
+    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name)), rolloutRegistry), authenticator);
   }
   if (registryRepository && registry instanceof InMemoryModelRegistry) {
     const refreshSeconds = config.registryRefreshSeconds ?? 15;
@@ -126,8 +143,9 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
       const durableRegistry = registry;
       const repository = registryRepository;
       const timer = setInterval(() => {
-        void repository.getCurrent().then((snapshot) => {
+        void repository.getCurrent().then(async (snapshot) => {
           if (snapshot && snapshot.version > durableRegistry.currentSnapshot().version) durableRegistry.load(snapshot);
+          if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
         }).catch((error: unknown) => { metrics.increment?.('registry_refresh_failure'); app.log.error({ err: error }, 'registry refresh failed'); });
       }, refreshSeconds * 1_000);
       timer.unref();

@@ -2,6 +2,17 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-10 - Controlled canary rollouts
+
+- Change: Added durable canary state, tenant-stable percentage assignment before ranking, explicit-model enforcement, manual promotion/rollback, and route-versioned cache keys.
+- Safety: PostgreSQL records outcomes and performs threshold rollback atomically after a minimum sample gate; cancellations do not count as provider failures, and only the winning transition writes the system audit event.
+- Operations: Added rollout read/action APIs, audit events, cross-router polling, and `rollout_auto_rollback` / `rollout_observation_failure` metrics.
+- Validation: Deterministic assignment/routing tests, threshold and concurrency tests, API/migration coverage, full build, and real PostgreSQL/Docker validation.
+- Boundary: Shadow duplication is intentionally deferred until separate budgets, privacy/redaction, side-effect suppression, asynchronous comparison, and evaluator integrity exist.
+- Follow-up: Windowed p95/error gates, quality and cost deltas, shadow evaluation, staged percentage changes, and automatic promotion policy remain.
+- Review hardening: Rollout observation waits are capped at 100 ms, preventing a stalled control-plane query from hanging an already completed response or SSE stream; timeout is surfaced as an operational failure metric.
+- Review hardening: Observation SQL is isolated in a four-connection bulkhead with server lock/statement and client query deadlines, so timed-out rollout work cannot exhaust the primary persistence pool.
+
 ## 2026-08-10 - Evidence-backed model promotion
 
 - Change: Added immutable model-version evidence records, audited submission/read APIs, non-mutating promotion assessment, and active-publication gates for newly enabled IDs or versions.
