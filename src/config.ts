@@ -20,6 +20,8 @@ export interface AppConfig {
   reservationLeaseSeconds?: number;
   reconciliationSweepSeconds?: number;
   registryRefreshSeconds?: number;
+  classifierMode?: 'disabled' | 'degrade' | 'fail';
+  classifierTimeoutMs?: number;
 }
 
 function numberEnv(value: string | undefined, fallback: number): number {
@@ -78,6 +80,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const production = environment === 'production';
   const apiCredentials = credentialsEnv(env.COSMY_API_CREDENTIALS);
   const tenantBudgetUsd = positiveEnv(env.TENANT_BUDGET_USD);
+  const configuredClassifierMode = env.CLASSIFIER_MODE;
+  if (configuredClassifierMode !== undefined && !['disabled', 'degrade', 'fail'].includes(configuredClassifierMode)) {
+    throw new Error(`Unsupported CLASSIFIER_MODE: ${configuredClassifierMode}`);
+  }
+  const defaultClassifierMode = environment === 'production' ? 'fail' : env.DEEPSEEK_API_KEY ? 'degrade' : 'disabled';
+  const classifierMode = (configuredClassifierMode ?? defaultClassifierMode) as NonNullable<AppConfig['classifierMode']>;
   return {
     host: env.HOST ?? '0.0.0.0',
     port: numberEnv(env.PORT, 8080),
@@ -98,5 +106,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     reservationLeaseSeconds: positiveIntegerEnv(env.RESERVATION_LEASE_SECONDS, 300),
     reconciliationSweepSeconds: nonNegativeIntegerEnv(env.RECONCILIATION_SWEEP_SECONDS, 30),
     registryRefreshSeconds: nonNegativeIntegerEnv(env.REGISTRY_REFRESH_SECONDS, 15),
+    classifierMode,
+    classifierTimeoutMs: numberEnv(env.CLASSIFIER_TIMEOUT_MS, 3_000),
   };
 }

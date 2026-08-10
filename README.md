@@ -6,8 +6,8 @@ The repository is currently in the architecture-definition milestone. Start with
 
 ## Project status
 
-- Phase: production architecture and contracts
-- Implementation: not started
+- Phase: runnable phase-1 router on `corelogic`
+- Implementation: provider-neutral API, classifier-assisted hybrid routing, provider adapters, fallback, persistence, and evaluation harness
 - Deployment assumption: cloud-neutral, horizontally scalable, multi-tenant
 - Primary optimization target: cost per successful task, subject to quality and policy constraints
 - Branch policy: focused commits; draft pull requests only for reasonably reviewable milestones

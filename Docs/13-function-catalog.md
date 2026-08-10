@@ -122,6 +122,8 @@ Errors: timeout, invalid output, provider unavailable.
 
 Invariants: classifier cannot modify policy; output ranges are validated.
 
+Phase-1 implementation: `RequestClassifier` is a replaceable port and `DeepSeekV4FlashClassifier` calls `/chat/completions` with a forced strict `classify_request` tool schema, thinking disabled, bounded input, caller cancellation, and strict local Zod validation.
+
 ## `features/extractRequestFeatures`
 
 Purpose: orchestrate deterministic rules, optional classifier, token estimates, and evidence composition.
@@ -187,6 +189,8 @@ Purpose: compute normalized utility for eligible candidates.
 Inputs: candidates with estimates, effective objective weights.
 
 Outputs: deterministic ordered scores and component breakdown.
+
+Phase-1 selection contract: reject candidates below conservative predicted task quality, preserve capability/provider fallback diversity during Pareto pruning, then order qualifying candidates by estimated cost first. `DeterministicRouter.decideAsync()` subsequently applies the deep-reasoning promotion gate before execution.
 
 Invariants: cannot receive rejected candidates; tie-breaker is stable.
 

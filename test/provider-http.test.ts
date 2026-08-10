@@ -8,6 +8,7 @@ const model: ModelConfiguration = {
   id: 'openai-test', provider: 'openai', model: 'gpt-test', version: 'test', enabled: true,
   capabilities: ['streaming', 'tools', 'structured-output'], modalities: ['text'],
   coordinates: { technicality: 0.8, creativity: 0.6, quality: 0.9, reasoning: 0.8 },
+  capabilityVector: { version: 'v1', technicalDifficulty: 0.8, reasoningDepth: 0.8, creativity: 0.6, designSkill: 0.7, factualPrecision: 0.9, ambiguity: 0.8, toolComplexity: 0.8, contextComplexity: 0.8, codingIntensity: 0.8, safetyStakes: 0.9 },
   pricing: { inputPerMillionUsd: 1, outputPerMillionUsd: 2 }, contextWindow: 10_000, maxOutputTokens: 2_000,
   regions: ['global'], allowedDataClasses: ['public', 'internal'], health: { availability: 1, latencyP95Ms: 100, errorRate: 0, checkedAt: 'test' },
 };

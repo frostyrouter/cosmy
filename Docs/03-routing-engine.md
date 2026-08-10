@@ -31,7 +31,7 @@ Rules produce features and confidence. Obvious transformations such as grammar c
 
 ### Stage 2: bounded semantic classification
 
-If rule confidence is below the effective threshold, invoke an inexpensive classifier with:
+For automatic async routing, invoke an inexpensive classifier before ranking with:
 
 - A compact prompt
 - No unnecessary tools
@@ -41,6 +41,8 @@ If rule confidence is below the effective threshold, invoke an inexpensive class
 - A classifier version recorded in the decision
 
 Classifier output is untrusted data and must pass schema and range validation.
+
+The phase-1 implementation uses DeepSeek V4 Flash as an injected routing classifier. It returns a versioned demand vector with normalized `[0,1]` axes for technical difficulty, reasoning depth, creativity, design skill, factual precision, quality requirement, ambiguity, tool complexity, context complexity, coding intensity, and safety/stakes. Design skill measures the request's need for visual hierarchy, layout, typography, interaction patterns, and coherent design-language execution; it is distinct from open-ended creativity. `deepReasoningRequired` is a separate boolean because it is evaluated only after initial ranking. Offline deterministic routing remains available for replay, and configured degrade mode uses that path after a classifier failure.
 
 ### Stage 3: hard filtering
 
@@ -61,22 +63,22 @@ Candidate filtering applies:
 
 No weighted score may restore a filtered candidate.
 
-### Stage 4: utility scoring
+### Stage 4: quality-constrained cost ranking
 
-For request `r`, configuration `m`, and policy `p`:
+For request `r` and configuration `m` in the phase-1 implementation:
 
 ```text
-utility(m,r,p) =
-    quality_value(m,r,p)
-  - cost_penalty(m,r,p)
-  - latency_penalty(m,r,p)
-  - reliability_penalty(m,r,p)
-  - switching_penalty(m,r,p)
-  + cache_benefit(m,r,p)
-  + diversity_benefit(m,r,p)
+coverage(m,r) = 1 - weighted_mean(max(0, demand_axis(r) - capability_axis(m)))
+predicted_quality(m,r) = min(model_quality(m), coverage(m,r))
+qualified(m,r) = predicted_quality(m,r) >= required_quality(r)
+selected(r) = argmin estimated_cost(m,r) over qualified candidates
 ```
 
-The quality term is based on evaluation evidence for similar tasks. The 2D technicality/creativity distance may contribute to similarity but never replaces task-family and capability evidence.
+The phase-1 ranker computes asymmetric capability coverage: only model shortfall below request demand is penalized; excess capability is not. Conservative predicted task quality is the lower of capability coverage and the model quality prior. Candidates below the effective quality floor are rejected.
+
+Eligible candidates are Pareto-pruned only when doing so preserves provider and capability diversity. Remaining candidates are ordered by estimated cost first, then predicted task quality, reliability, latency, and stable model ID. This guarantees that the selected model is the cheapest known configuration predicted to meet the requested quality and all hard constraints.
+
+After the initial model is selected, the reasoning gate checks `deepReasoningRequired`. A non-reasoning initial selection is promoted to the next cheapest already-eligible reasoning-capable candidate. Non-reasoning candidates cannot remain as execution fallbacks for that request.
 
 ### Stage 5: route-plan construction
 
@@ -121,6 +123,8 @@ interface RequestFeatures {
   evidence: FeatureEvidence[];
 }
 ```
+
+The executable phase-1 contract currently stores the semantic dimensions in a versioned `RequestDemandVector` and records classifier confidence/provenance alongside deterministic request facts.
 
 Continuous scores are normalized to `[0,1]`. Their meaning is defined by versioned calibration fixtures.
 

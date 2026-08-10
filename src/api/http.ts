@@ -74,13 +74,25 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     try {
       if (input.stream) {
         const stream = service.stream(input, controller.signal);
+        const iterator = stream[Symbol.asyncIterator]();
+        let first: IteratorResult<import('../domain/types.js').ResponseChunk>;
+        try {
+          first = await iterator.next();
+        } catch (error) {
+          const normalized = errorBody(error, input.requestId);
+          return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+        }
         reply.hijack();
         reply.raw.statusCode = 200;
         reply.raw.setHeader('content-type', 'text/event-stream');
         reply.raw.setHeader('cache-control', 'no-cache');
         reply.raw.setHeader('connection', 'keep-alive');
         try {
-          for await (const chunk of stream) writeSse(reply, chunk.done ? 'done' : 'delta', chunk);
+          if (!first.done) writeSse(reply, first.value.done ? 'done' : 'delta', first.value);
+          while (!first.done) {
+            first = await iterator.next();
+            if (!first.done) writeSse(reply, first.value.done ? 'done' : 'delta', first.value);
+          }
         } catch (error) {
           request.log.warn({ err: error }, 'stream failed');
           writeSse(reply, 'error', errorBody(error, input.requestId));

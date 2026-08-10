@@ -80,7 +80,7 @@ export class RouterService {
 
   private async completeOnce(request: ResponseRequest, signal: AbortSignal): Promise<ResponseResult> {
     const id = request.requestId ?? requestId();
-    const route = this.router.decide(id, request);
+    const route = await this.router.decideAsync(id, request, signal);
     const cache = this.cache;
     if (!cache || this.cacheTtlSeconds <= 0 || !cacheEligible(request)) return this.executor.execute({ requestId: id, route, request, signal });
     const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.(), route.selected.model.id, route.selected.model.version);
@@ -97,9 +97,9 @@ export class RouterService {
     return result;
   }
 
-  stream(request: ResponseRequest, signal: AbortSignal): AsyncIterable<ResponseChunk> {
+  async *stream(request: ResponseRequest, signal: AbortSignal): AsyncIterable<ResponseChunk> {
     const id = request.requestId ?? requestId();
-    const route = this.router.decide(id, request);
-    return this.executor.stream({ requestId: id, route, request, signal });
+    const route = await this.router.decideAsync(id, request, signal);
+    for await (const chunk of this.executor.stream({ requestId: id, route, request, signal })) yield chunk;
   }
 }

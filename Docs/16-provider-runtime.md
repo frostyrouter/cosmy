@@ -12,11 +12,21 @@ The supported provider pairs are:
 | Anthropic | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` |
 | Gemini | `GEMINI_API_KEY` | `GEMINI_MODEL` |
 
+The routing classifier is configured separately from executable providers:
+
+| Component | API key | Model |
+| --- | --- | --- |
+| DeepSeek classifier | `DEEPSEEK_API_KEY` | `DEEPSEEK_CLASSIFIER_MODEL` (default `deepseek-v4-flash`) |
+
+`CLASSIFIER_MODE` accepts `disabled`, `degrade`, or `fail`. Development defaults to `degrade` when a DeepSeek key is present; production defaults to `fail` and therefore refuses startup without a classifier. `CLASSIFIER_TIMEOUT_MS` defaults to 3000 and `CLASSIFIER_MAX_INPUT_CHARS` defaults to 200000. The classifier is not registered as an executable response provider and cannot select a model directly.
+
 Optional `*_BASE_URL` variables support a compatible gateway or test server. The model manifest also accepts provider-specific quality, coordinate, region, context, output, and price variables. Pricing must be configured from the provider account or an approved catalog before production routing; development defaults are estimates only.
 
 ## Request lifecycle
 
 At startup, configured manifests are merged with the simulator manifest. The provider factory creates one adapter per configured provider, and the application wraps every adapter in `ResilientProvider`.
+
+Before provider execution, `RouterService` awaits semantic classification and the reasoning gate. Streaming does not emit headers or provider deltas until route construction completes.
 
 Each complete or stream attempt has:
 

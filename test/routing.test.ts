@@ -2,8 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { defaultModels } from '../src/registry/default-models.js';
 import { InMemoryModelRegistry } from '../src/registry/memory-registry.js';
 import { DeterministicRouter } from '../src/routing/router.js';
-import { filterEligible, rankCandidates } from '../src/routing/policy.js';
+import { capabilityCoverage, filterEligible, paretoPruneCandidates, rankCandidates } from '../src/routing/policy.js';
 import { extractFeatures } from '../src/routing/features.js';
+import type { ModelConfiguration, RequestFeatures } from '../src/domain/types.js';
+import { modelCapabilityVectorVersion, requestDemandVectorVersion } from '../src/domain/types.js';
+
+function vector(overrides: Partial<NonNullable<RequestFeatures['demandVector']>> = {}): NonNullable<RequestFeatures['demandVector']> {
+  return {
+    version: requestDemandVectorVersion, technicalDifficulty: 0, reasoningDepth: 0, creativity: 0, designSkill: 0,
+    factualPrecision: 0, qualityRequirement: 0, ambiguity: 0, toolComplexity: 0, contextComplexity: 0,
+    codingIntensity: 0, safetyStakes: 0, ...overrides,
+  };
+}
+
+function features(demandVector: NonNullable<RequestFeatures['demandVector']>): RequestFeatures {
+  return { ...extractFeatures({ messages: [{ role: 'user', content: 'hello' }] }), demandVector };
+}
+
+function model(base: ModelConfiguration, overrides: Partial<ModelConfiguration> = {}): ModelConfiguration {
+  return { ...base, capabilityVector: { version: modelCapabilityVectorVersion, technicalDifficulty: 1, reasoningDepth: 1, creativity: 1, designSkill: 1, factualPrecision: 1, ambiguity: 1, toolComplexity: 1, contextComplexity: 1, codingIntensity: 1, safetyStakes: 1 }, ...overrides };
+}
 
 describe('request feature extraction', () => {
   it('recognizes technical, creative, tool, and structured requirements', () => {
@@ -64,5 +82,48 @@ describe('eligibility and ranking', () => {
     expect(decision.selected.estimatedCostUsd).toBeLessThanOrEqual(0.0015);
     expect(decision.selected.model.id).toBe('sim-small-text');
     expect(decision.rejected.find((item) => item.reason === 'max_cost_exceeded')?.modelId).toBe('sim-balanced');
+  });
+
+  it('chooses the cheapest candidate that meets predicted quality', () => {
+    const demand = features(vector({ qualityRequirement: 0.8, technicalDifficulty: 0.9 }));
+    const cheap = model(defaultModels[1]!, { id: 'cheap', coordinates: { ...defaultModels[1]!.coordinates, quality: 0.85 }, pricing: { inputPerMillionUsd: 0.01, outputPerMillionUsd: 0.01 } });
+    const expensive = model(defaultModels[2]!, { id: 'expensive', pricing: { inputPerMillionUsd: 10, outputPerMillionUsd: 10 } });
+    const eligible = filterEligible([expensive, cheap], demand).eligible;
+    expect(rankCandidates(eligible, demand).map((candidate) => candidate.model.id)).toEqual(['cheap', 'expensive']);
+  });
+
+  it('rejects a cheap model whose predicted quality is below the demand requirement', () => {
+    const demand = features(vector({ qualityRequirement: 0.8 }));
+    const cheap = model(defaultModels[0]!, { id: 'cheap', coordinates: { ...defaultModels[0]!.coordinates, quality: 0.7 }, pricing: { inputPerMillionUsd: 0.01, outputPerMillionUsd: 0.01 } });
+    const result = filterEligible([cheap], demand);
+    expect(result.eligible).toHaveLength(0);
+    expect(result.rejected).toEqual([{ modelId: 'cheap', reason: 'quality_floor' }]);
+  });
+
+  it('routes design-heavy work away from a cheaper model with weak design skill', () => {
+    const demand = features(vector({ designSkill: 1, qualityRequirement: 0.9 }));
+    const weakDesign = model(defaultModels[1]!, { id: 'cheap-weak-design', coordinates: { ...defaultModels[1]!.coordinates, quality: 0.95 }, capabilityVector: { ...model(defaultModels[1]!).capabilityVector, designSkill: 0 }, pricing: { inputPerMillionUsd: 0.01, outputPerMillionUsd: 0.01 } });
+    const strongDesign = model(defaultModels[2]!, { id: 'expensive-strong-design', coordinates: { ...defaultModels[2]!.coordinates, quality: 0.95 }, pricing: { inputPerMillionUsd: 10, outputPerMillionUsd: 10 } });
+    const result = filterEligible([weakDesign, strongDesign], demand);
+    expect(result.rejected).toContainEqual({ modelId: 'cheap-weak-design', reason: 'quality_floor' });
+    expect(rankCandidates(result.eligible, demand).map((candidate) => candidate.model.id)).toEqual(['expensive-strong-design']);
+  });
+
+  it('keeps a reasoning-capable fallback from a cheaper non-reasoning model', () => {
+    const demand = features(vector());
+    const cheap = model(defaultModels[0]!, { id: 'cheap-non-reasoning', capabilities: ['streaming', 'structured-output'], coordinates: { ...defaultModels[0]!.coordinates, quality: 0.95 }, pricing: { inputPerMillionUsd: 0.01, outputPerMillionUsd: 0.01 }, health: { ...defaultModels[0]!.health, availability: 1, errorRate: 0, latencyP95Ms: 100 } });
+    const reasoning = model(defaultModels[1]!, { id: 'reasoning-fallback', coordinates: { ...defaultModels[1]!.coordinates, quality: 0.85 }, pricing: { inputPerMillionUsd: 1, outputPerMillionUsd: 1 }, health: { ...defaultModels[1]!.health, availability: 0.9, errorRate: 0.1, latencyP95Ms: 900 } });
+    expect(rankCandidates([cheap, reasoning], demand).map((candidate) => candidate.model.id)).toEqual(['cheap-non-reasoning', 'reasoning-fallback']);
+  });
+
+  it('uses lexical model IDs for stable ties regardless of registry order', () => {
+    const demand = features(vector());
+    const first = model(defaultModels[0]!, { id: 'model-a', pricing: { inputPerMillionUsd: 1, outputPerMillionUsd: 1 } });
+    const second = model(defaultModels[0]!, { id: 'model-b', pricing: { inputPerMillionUsd: 1, outputPerMillionUsd: 1 } });
+    const ordered = (models: readonly ModelConfiguration[]) => rankCandidates(models, demand).map((candidate) => candidate.model.id);
+    expect(ordered([second, first])).toEqual(['model-a', 'model-b']);
+    expect(ordered([first, second])).toEqual(['model-a', 'model-b']);
+    expect(capabilityCoverage(demand, first)).toBe(1);
+    expect(paretoPruneCandidates(rankCandidates([first, second], demand))).toHaveLength(2);
   });
 });

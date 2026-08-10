@@ -145,3 +145,13 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Validation: Mock contract tests, real PostgreSQL concurrent reservation tests, full test suite, build, and Docker Compose smoke.
 - Migration: Existing databases re-run idempotent migration 001 once to establish checksums, then apply migration 002. Never edit a migration after deployment.
 - Follow-up: Add durable reconciliation jobs and budget administration/audit APIs in the control-plane milestone.
+
+## 2026-08-10 - Hybrid latent-space router (working-tree change; commit pending)
+
+- Change: Added a DeepSeek V4 Flash routing-classifier boundary, strict versioned request/model vectors, conservative predicted-quality gating, safe Pareto pruning, and deterministic cost-first selection.
+- Change: Replaced the low-signal domain-specialization dimension with an explicit design-skill axis beside creativity, covering visual hierarchy, layout, typography, interaction patterns, and design-language execution.
+- Change: Added the post-ranking deep-reasoning gate so an initially selected non-reasoning model is promoted to the next cheapest eligible reasoning-capable model.
+- Impact: `/v1/responses` can now choose the cheapest model predicted to meet the requested quality while retaining hard policy, latency, cost, capability, cancellation, and fallback guarantees.
+- Files or subsystems: Domain contracts, routing features/policy/router, model registry, classifier/provider configuration, service/API wiring, documentation, and unit/integration tests.
+- Validation: 128 project tests passed (13 PostgreSQL integration tests skipped without a database) with no paid model calls; TypeScript lint, production build, and diff whitespace validation also passed.
+- Limitations and follow-up: Model quality and capability vectors are configured priors until production evaluation profiles calibrate them. Classifier cost/usage telemetry and shared production health snapshots remain follow-up work.
