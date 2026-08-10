@@ -5,7 +5,7 @@ import { defaultModels } from './registry/default-models.js';
 import { InMemoryModelRegistry } from './registry/memory-registry.js';
 import { InMemoryUsageLedger } from './stores/memory-usage-ledger.js';
 import { InMemoryHealthStore } from './stores/memory-health-store.js';
-import { configuredModelManifests, configuredProviders } from './providers/configured.js';
+import { configuredClassifier, configuredModelManifests, configuredProviders } from './providers/configured.js';
 import { DeterministicRouter } from './routing/router.js';
 import { RequestExecutor } from './execution/executor.js';
 import { resilientProviders } from './execution/resilience.js';
@@ -16,6 +16,7 @@ import { registerDiagnosticsRoute, registerMetricsRoute } from './api/metrics-ht
 import { InMemoryMetrics } from './observability/metrics.js';
 import { loadConfig, type AppConfig } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
+import type { RequestClassifier } from './ports/classifier.js';
 import type { BudgetAdministration, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
 import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
@@ -37,9 +38,16 @@ export interface AppDependencies {
   cache?: import('./persistence/contracts.js').ResponseCache;
   authenticator?: RequestAuthenticator;
   idempotency?: import('./persistence/contracts.js').IdempotencyStore;
+  classifier?: RequestClassifier | null;
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
+  // Explicit test configuration must never inherit ambient credentials and make paid calls.
+  const runtimeEnv = dependencies.env ?? (config.environment === 'test' ? {} : process.env);
+  const availableClassifier = dependencies.classifier === undefined ? configuredClassifier(runtimeEnv) : dependencies.classifier ?? undefined;
+  const classifierMode = config.classifierMode ?? (config.environment === 'production' ? 'fail' : availableClassifier ? 'degrade' : 'disabled');
+  const classifier = classifierMode === 'disabled' ? undefined : availableClassifier;
   const app = Fastify({ logger: { level: config.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
     try { done(null, JSON.parse(String(body))); } catch { done(Object.assign(new Error('Invalid JSON body'), { statusCode: 400 })); }
@@ -52,6 +60,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   if (config.environment === 'production' && !config.allowUnauthenticated && !authenticator) {
     throw new Error('Production requires COSMY_API_CREDENTIALS or explicit ALLOW_UNAUTHENTICATED=true');
   }
+  if (classifierMode === 'fail' && !availableClassifier) throw new Error('DEEPSEEK_API_KEY is required when CLASSIFIER_MODE=fail');
   let postgres: PostgresSqlClient | undefined;
   let rolloutPostgres: PostgresSqlClient | undefined;
   let registryRepository: PostgresRegistryRepository | undefined;
@@ -69,7 +78,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     }
     app.addHook('onClose', async () => { await rolloutPostgres?.close(); await postgres?.close(); });
   }
-  const seedModels = [...defaultModels, ...configuredModelManifests()];
+  const seedModels = [...defaultModels, ...configuredModelManifests(runtimeEnv)];
   let registry = dependencies.registry;
   if (!registry && postgres) {
     registryRepository = new PostgresRegistryRepository(postgres);
@@ -96,14 +105,19 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const health = dependencies.health ?? new InMemoryHealthStore();
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
   registerMetricsRoute(app, metrics, authenticator);
-  const providers = resilientProviders(configuredProviders(process.env, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
+  const providers = resilientProviders(configuredProviders(runtimeEnv, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
   const providerAdapters = dependencies.providers ?? providers;
   const rolloutRegistry = new InMemoryRolloutRegistry();
   const controlStore: ControlPlaneStore | undefined = registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))
     ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
     : undefined;
   if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
-  const router = new DeterministicRouter(registry, undefined, rolloutRegistry);
+  const router = new DeterministicRouter(registry, {
+    ...(classifier ? { classifier } : {}),
+    classifierTimeoutMs: config.classifierTimeoutMs ?? 3_000,
+    failureMode: classifierMode === 'fail' ? 'fail' : 'degrade',
+    admission: rolloutRegistry,
+  });
   const rolloutObserver = controlStore ? {
     recordOutcome: async (outcome: RolloutOutcome) => {
       const before = rolloutRegistry.get(outcome.modelId);

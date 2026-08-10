@@ -6,12 +6,13 @@ This slice turns the architecture contracts into a runnable, provider-neutral se
 
 `POST /v1/responses` accepts a normalized request with messages, optional tools, structured-output requirements, streaming, and policy hints. The HTTP layer validates input, creates a request-local cancellation signal, and never exposes provider-specific response shapes.
 
-The service composes four replaceable parts:
+The service composes five replaceable parts:
 
 1. `DeterministicRouter` extracts request features, filters models by hard constraints, and ranks eligible candidates.
 2. `RequestExecutor` reserves budget, invokes the selected provider, records usage, and updates health.
 3. `ProviderAdapter` hides provider-specific transport and normalization.
 4. `ModelRegistry` and stores provide the control-plane data boundary; memory implementations make local tests deterministic.
+5. `RequestClassifier` produces a validated semantic demand vector before automatic production routing.
 
 ## Simulator first
 
@@ -19,7 +20,9 @@ The simulator is intentionally the default provider. It exercises complete and S
 
 ## Routing behavior
 
-The 2D coordinates remain explainability metadata. Eligibility is always decided before scoring. A model can only score if it satisfies context, output, capabilities, modality, data-class, region, quality, and lifecycle constraints. Ranking then combines quality, cost, latency, and distance from inferred request coordinates.
+Each model can carry a versioned multidimensional capability vector. Automatic async routing merges deterministic request facts with a validated DeepSeek V4 Flash demand vector, applies hard policy and quality constraints, Pareto-prunes only safe same-provider supersets, and selects the cheapest qualifying candidate. Deep-reasoning support is deliberately checked after initial selection; an incompatible candidate is promoted to the next cheapest reasoning-capable option.
+
+The synchronous `decide()` path remains available for deterministic replay and offline evaluation. Classifier timeout or invalid output can either degrade to that path or fail closed according to `CLASSIFIER_MODE`.
 
 ## Development commands
 

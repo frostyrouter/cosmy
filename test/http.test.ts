@@ -239,7 +239,7 @@ describe('HTTP API', () => {
   });
 
   it('returns a 504 timeout when the request deadline expires over HTTP', async () => {
-    const model = { id: 'slow', provider: 'slow', model: 'slow', version: '1', enabled: true, capabilities: [], modalities: ['text' as const], coordinates: { technicality: 0.5, creativity: 0.5, quality: 0.5, reasoning: 0.5 }, pricing: { inputPerMillionUsd: 0.1, outputPerMillionUsd: 0.3 }, contextWindow: 16_000, maxOutputTokens: 4_000, regions: ['global'], allowedDataClasses: ['public' as const, 'internal' as const], health: { availability: 1, latencyP95Ms: 10, errorRate: 0, checkedAt: 'test' } };
+    const model = { id: 'slow', provider: 'slow', model: 'slow', version: '1', enabled: true, capabilities: [], modalities: ['text' as const], coordinates: { technicality: 0.5, creativity: 0.5, quality: 0.5, reasoning: 0.5 }, capabilityVector: { version: 'v1' as const, technicalDifficulty: 0.5, reasoningDepth: 0.5, creativity: 0.5, designSkill: 0.5, factualPrecision: 0.5, ambiguity: 0.5, toolComplexity: 0.5, contextComplexity: 0.5, codingIntensity: 0.5, safetyStakes: 0.5 }, pricing: { inputPerMillionUsd: 0.1, outputPerMillionUsd: 0.3 }, contextWindow: 16_000, maxOutputTokens: 4_000, regions: ['global'], allowedDataClasses: ['public' as const, 'internal' as const], health: { availability: 1, latencyP95Ms: 10, errorRate: 0, checkedAt: 'test' } };
     const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const slow: import('../src/ports/provider.js').ProviderAdapter = {
       name: 'slow', listModels: () => [model],

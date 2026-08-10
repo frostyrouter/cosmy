@@ -52,6 +52,67 @@ export interface ModelCoordinates {
   reasoning: number;
 }
 
+export const requestDemandVectorVersion = 'v1' as const;
+export type RequestDemandVectorVersion = typeof requestDemandVectorVersion;
+
+export interface RequestDemandVector {
+  version: RequestDemandVectorVersion;
+  technicalDifficulty: number;
+  reasoningDepth: number;
+  creativity: number;
+  designSkill: number;
+  factualPrecision: number;
+  qualityRequirement: number;
+  ambiguity: number;
+  toolComplexity: number;
+  contextComplexity: number;
+  codingIntensity: number;
+  safetyStakes: number;
+}
+
+export const modelCapabilityVectorVersion = 'v1' as const;
+export type ModelCapabilityVectorVersion = typeof modelCapabilityVectorVersion;
+
+export interface ModelCapabilityVector {
+  version: ModelCapabilityVectorVersion;
+  technicalDifficulty: number;
+  reasoningDepth: number;
+  creativity: number;
+  designSkill: number;
+  factualPrecision: number;
+  ambiguity: number;
+  toolComplexity: number;
+  contextComplexity: number;
+  codingIntensity: number;
+  safetyStakes: number;
+}
+
+export interface ClassifierMetadata {
+  provider: string;
+  model: string;
+  classifierVersion: string;
+}
+
+export interface RequestClassification {
+  demandVector: RequestDemandVector;
+  deepReasoningRequired: boolean;
+  confidence: number;
+  classifierMetadata: ClassifierMetadata;
+}
+
+export type ClassificationStatus = 'deterministic' | 'classified' | 'degraded';
+
+export interface ReasoningGateMetadata {
+  initialModelId: string;
+  selectedModelId: string;
+  promoted: boolean;
+}
+
+export interface RouteMetadata {
+  classificationStatus: ClassificationStatus;
+  reasoningGate: ReasoningGateMetadata;
+}
+
 export interface ModelPricing {
   inputPerMillionUsd: number;
   outputPerMillionUsd: number;
@@ -80,6 +141,7 @@ export interface ModelConfiguration {
   regions: string[];
   allowedDataClasses: DataClass[];
   health: ModelHealth;
+  capabilityVector: ModelCapabilityVector;
   defaultTemperature?: number;
 }
 
@@ -95,6 +157,10 @@ export interface RequestFeatures {
   creativity: number;
   reasoning: number;
   dataClass: DataClass;
+  demandVector?: RequestDemandVector;
+  deepReasoningRequired?: boolean;
+  classificationConfidence?: number;
+  classifierMetadata?: ClassifierMetadata;
 }
 
 export interface Rejection {
@@ -105,6 +171,8 @@ export interface Rejection {
 export interface RouteCandidate {
   model: ModelConfiguration;
   score: number;
+  capabilityCoverage: number;
+  predictedTaskQuality: number;
   estimatedCostUsd: number;
   estimatedLatencyMs: number;
   reasons: string[];
@@ -118,6 +186,7 @@ export interface RouteDecision {
   features: RequestFeatures;
   policyVersion: string;
   createdAt: string;
+  metadata?: RouteMetadata;
 }
 
 export interface Usage {

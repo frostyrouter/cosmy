@@ -1,5 +1,6 @@
 import type { ModelConfiguration } from '../domain/types.js';
 import type { ModelRegistry, RegistrySnapshot, VersionedModelRegistry } from '../ports/stores.js';
+import { parseModelCapabilityVector } from '../routing/vector.js';
 import { nowIso } from '../util/ids.js';
 
 export class InMemoryModelRegistry implements VersionedModelRegistry {
@@ -22,7 +23,11 @@ export class InMemoryModelRegistry implements VersionedModelRegistry {
   }
 
   publish(models: readonly ModelConfiguration[], source: string): RegistrySnapshot {
-    this.models = new Map(models.map((model) => [model.id, structuredClone(model)]));
+    const parsedModels = models.map((model) => ({
+      ...model,
+      capabilityVector: parseModelCapabilityVector(model.capabilityVector),
+    }));
+    this.models = new Map(parsedModels.map((model) => [model.id, structuredClone(model)]));
     this.cachedSnapshot = null;
     this.version += 1;
     this.source = source;

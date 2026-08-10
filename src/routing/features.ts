@@ -1,4 +1,4 @@
-import type { RequestFeatures, ResponseRequest, Modality } from '../domain/types.js';
+import type { RequestClassification, RequestFeatures, ResponseRequest, Modality } from '../domain/types.js';
 
 const technicalTerms = /\b(api|sql|typescript|javascript|python|algorithm|architecture|compile|debug|regex|schema|database|kubernetes|terraform|proof|equation)\b/gi;
 const creativeTerms = /\b(imagine|story|poem|creative|metaphor|brainstorm|tagline|fiction|character|beautiful|playful)\b/gi;
@@ -49,5 +49,15 @@ export function extractFeatures(input: ResponseRequest): RequestFeatures {
     creativity: Math.min(1, creative / Math.max(1, words / 25)),
     reasoning: Math.min(1, reasoning / Math.max(1, words / 25)),
     dataClass: input.policy?.dataClass ?? 'internal',
+  };
+}
+
+export function mergeClassification(features: RequestFeatures, classification: RequestClassification): RequestFeatures {
+  return {
+    ...features,
+    demandVector: classification.demandVector,
+    deepReasoningRequired: classification.deepReasoningRequired,
+    classificationConfidence: classification.confidence,
+    classifierMetadata: classification.classifierMetadata,
   };
 }
