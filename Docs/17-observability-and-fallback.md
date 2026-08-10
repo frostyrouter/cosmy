@@ -14,6 +14,6 @@ The executor now owns provider fallback because it is the first layer that knows
 
 ## Metrics boundary
 
-`MetricsSink` is intentionally vendor-neutral. The in-memory implementation records request count, success/error/cancellation count, fallback count, latency distribution, token totals, and cost. A future exporter can translate the same events into the chosen monitoring backend without changing the router or provider adapters.
+`MetricsSink` is intentionally vendor-neutral. The in-memory implementation records request count, success/error/cancellation count, fallback count, active streams, latency distribution, token totals, cost, and bounded operational failure counters. The authenticated `/metrics` endpoint translates these events to Prometheus text without changing router or provider adapters.
 
-The metrics contract must not record prompts, outputs, API keys, or raw provider payloads. Correlate using request IDs and stable model/provider labels only. Export remains an application-specific integration decision and is intentionally not bundled yet.
+The metrics contract must not record prompts, outputs, tenant IDs, API keys, arbitrary metadata, or raw provider payloads. Export uses only bounded stable model/provider/status labels. See [Operational observability](24-operational-observability.md).

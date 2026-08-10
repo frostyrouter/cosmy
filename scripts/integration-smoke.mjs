@@ -16,10 +16,15 @@ async function waitForHealth() {
 await waitForHealth();
 const payload = { messages: [{ role: 'user', content: 'hello from integration smoke' }] };
 async function complete() {
-  const response = await fetch(`${baseUrl}/v1/responses`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+  const response = await fetch(`${baseUrl}/v1/responses`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer integration-response' }, body: JSON.stringify(payload) });
   if (!response.ok) throw new Error(`Router response failed with HTTP ${response.status}`);
   return response.json();
 }
 const body = await complete();
 if (body.status !== 'completed' || !body.output) throw new Error('Router returned an invalid completion');
+const metrics = await fetch(`${baseUrl}/metrics`, { headers: { authorization: 'Bearer integration-metrics' } });
+if (!metrics.ok) throw new Error(`Metrics scrape failed with HTTP ${metrics.status}`);
+const metricsBody = await metrics.text();
+if (!metricsBody.includes('cosmy_provider_attempts_total{provider="simulator"')) throw new Error('Metrics scrape did not include the provider attempt');
+if (metricsBody.includes('hello from integration smoke') || metricsBody.includes('integration-response')) throw new Error('Metrics scrape leaked request content or credentials');
 console.log(JSON.stringify({ status: body.status, model: body.model, provider: body.provider }));

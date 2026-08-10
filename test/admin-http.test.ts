@@ -25,6 +25,9 @@ describe('administrative HTTP API', () => {
     expect(ordinary.statusCode).toBe(403);
     expect(admin.statusCode).toBe(200);
     expect(admin.json().models.length).toBeGreaterThan(0);
+    const diagnostics = await app.inject({ method: 'GET', url: '/v1/admin/diagnostics', headers: { authorization: `Bearer ${adminKey}` } });
+    expect(diagnostics.statusCode).toBe(200);
+    expect(diagnostics.json()).toMatchObject({ status: 'ready', persistence: 'memory', registry: { modelCount: 3, enabledModelCount: 3 } });
   });
 
   it('publishes validated model snapshots and records an audit event', async () => {

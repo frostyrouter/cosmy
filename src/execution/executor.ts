@@ -62,37 +62,42 @@ export class RequestExecutor {
   }
 
   async *stream(options: ExecutionOptions): AsyncIterable<ResponseChunk> {
-    const { request, route, requestId, signal } = options;
-    if (signal.aborted) throw new RequestCancelledError();
-    if (route.alternatives.length === 0) {
-      for await (const chunk of this.streamCandidate({ requestId, route, request, signal, fallbackIndex: 0 })) yield chunk;
-      return;
-    }
-    const candidates = [route.selected, ...route.alternatives];
-    for (const [fallbackIndex, candidate] of candidates.entries()) {
-      const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
-      let emitted = false;
-      try {
-        for await (const chunk of this.streamCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex })) {
-          emitted = emitted || chunk.delta.length > 0;
-          yield chunk;
-        }
+    this.metrics?.streamOpened?.();
+    try {
+      const { request, route, requestId, signal } = options;
+      if (signal.aborted) throw new RequestCancelledError();
+      if (route.alternatives.length === 0) {
+        for await (const chunk of this.streamCandidate({ requestId, route, request, signal, fallbackIndex: 0 })) yield chunk;
         return;
-      } catch (error) {
-        if (request.policy?.allowFallback === false || emitted || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
       }
-    }
+      const candidates = [route.selected, ...route.alternatives];
+      for (const [fallbackIndex, candidate] of candidates.entries()) {
+        const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
+        let emitted = false;
+        try {
+          for await (const chunk of this.streamCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex })) {
+            emitted = emitted || chunk.delta.length > 0;
+            yield chunk;
+          }
+          return;
+        } catch (error) {
+          if (request.policy?.allowFallback === false || emitted || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+        }
+      }
+    } finally { this.metrics?.streamClosed?.(); }
   }
 
-  private async reconcileBestEffort(reservation: UsageReservation, actualCostUsd: number): Promise<void> {
+  private async reconcileBestEffort(reservation: UsageReservation, actualCostUsd: number): Promise<boolean> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await this.usage.reconcile(reservation, actualCostUsd);
-        return;
+        return true;
       } catch {
         // transient store failure; retry once, then best-effort release
       }
     }
+    this.metrics?.increment?.('reconciliation_failure');
+    return false;
   }
 
   private async executeCandidate(options: ExecutionOptions & { fallbackIndex: number }): Promise<ResponseResult> {

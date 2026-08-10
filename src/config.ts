@@ -62,7 +62,7 @@ function credentialsEnv(value: string | undefined): readonly ApiCredential[] | u
     if (typeof entry !== 'object' || entry === null) throw new Error(`Credential at index ${index} must be an object`);
     const value = entry as Record<string, unknown>;
     const scopes = value.scopes ?? ['responses:create'];
-    const allowedScopes: readonly ApiScope[] = ['responses:create', 'admin:read', 'admin:write'];
+    const allowedScopes: readonly ApiScope[] = ['responses:create', 'admin:read', 'admin:write', 'metrics:read'];
     if (typeof value.id !== 'string' || typeof value.tenantId !== 'string' || typeof value.keySha256 !== 'string' || !Array.isArray(scopes) || scopes.some((scope) => !allowedScopes.includes(scope as ApiScope))) {
       throw new Error(`Credential at index ${index} is invalid`);
     }

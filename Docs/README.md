@@ -29,6 +29,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Tenant security](21-tenant-security.md)
 - [Safe retries and response caching](22-idempotency-and-cache.md)
 - [Control-plane operations](23-control-plane-operations.md)
+- [Operational observability](24-operational-observability.md)
 
 ## Decision status vocabulary
 

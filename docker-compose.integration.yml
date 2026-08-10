@@ -23,6 +23,7 @@ services:
       PORT: 8080
       REQUEST_TIMEOUT_MS: 10000
       PROVIDER_MAX_RETRIES: 0
+      COSMY_API_CREDENTIALS: '[{"id":"integration-response","tenantId":"integration","keySha256":"c92762865f28145e7a55bf1fa0a6beb1eb1d4adea64ad40b11b710cb47bce4e8","scopes":["responses:create"]},{"id":"integration-metrics","tenantId":"operations","keySha256":"f42d985bfc04c43055baa789dc036d2517d63e15458c6f618f30d6b1c9dc1932","scopes":["metrics:read"]}]'
       PERSISTENCE_MODE: postgres
       DATABASE_URL: postgresql://cosmy:cosmy@postgres:5432/cosmy
     depends_on:

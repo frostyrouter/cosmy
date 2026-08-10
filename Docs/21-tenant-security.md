@@ -12,6 +12,7 @@ Status: implemented foundation.
 | Authorization | Response callers need `responses:create`; operators use separate `admin:read` or `admin:write` credentials. |
 | Production startup | Startup fails closed without credentials unless `ALLOW_UNAUTHENTICATED=true` is explicit. |
 | Probes | `/healthz` and `/readyz` stay unauthenticated and unmetered. |
+| Metrics | `/metrics` requires a dedicated `metrics:read` or administrative scope. |
 
 ## Configure it
 
