@@ -4,6 +4,7 @@ import type { BudgetSnapshot, RegistrySnapshot, UsageReservation } from '../port
 import type { AuditEvent, ControlPlaneStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
+import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
 export interface SqlClient {
@@ -19,6 +20,7 @@ interface BudgetRow { tenant_id: string; limit_usd: string | number; reserved_us
 interface IdempotencyRow { request_hash: string; status: 'processing' | 'completed'; response_json: ResponseResult | null; }
 interface AuditRow { id: string; actor_credential_id: string; actor_tenant_id: string; action: AuditEvent['action']; target: string; details: Record<string, unknown>; occurred_at: string; }
 interface EvidenceRow { id: string; model_id: string; model_version: string; suite_version: string; dataset_version: string; conformance_passed: boolean; pricing_verified: boolean; usage_verified: boolean; routing_pass_rate: number; quality_score: number; sample_count: number; evaluated_at: string; expires_at: string; submitted_by_credential_id: string; submitted_at: string; }
+interface RolloutRow { id: string; model_id: string; model_version: string; state: ModelRollout['state']; traffic_percentage: number; minimum_samples: number; maximum_error_rate: number; maximum_average_latency_ms: number; sample_count: string | number; error_count: string | number; total_latency_ms: number; reason: string | null; created_at: string; updated_at: string; }
 
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
@@ -146,6 +148,17 @@ function promotionEvidence(row: EvidenceRow): ModelPromotionEvidence {
   };
 }
 
+function modelRollout(row: RolloutRow): ModelRollout {
+  return {
+    id: row.id, modelId: row.model_id, modelVersion: row.model_version, state: row.state,
+    trafficPercentage: Number(row.traffic_percentage), minimumSamples: Number(row.minimum_samples), maximumErrorRate: Number(row.maximum_error_rate), maximumAverageLatencyMs: Number(row.maximum_average_latency_ms),
+    sampleCount: Number(row.sample_count), errorCount: Number(row.error_count), totalLatencyMs: Number(row.total_latency_ms),
+    ...(row.reason ? { reason: row.reason } : {}), createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+const rolloutColumns = 'id, model_id, model_version, state, traffic_percentage, minimum_samples, maximum_error_rate, maximum_average_latency_ms, sample_count, error_count, total_latency_ms, reason, created_at, updated_at';
+
 export class PostgresControlPlaneStore implements ControlPlaneStore {
   constructor(private readonly db: SqlClient) {}
 
@@ -216,6 +229,66 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
   }
 
   evidenceFor(modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined> { return this.evidenceForWith(this.db, modelId, modelVersion); }
+
+  async createRollout(input: Omit<ModelRollout, 'id' | 'state' | 'sampleCount' | 'errorCount' | 'totalLatencyMs' | 'reason' | 'createdAt' | 'updatedAt'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelRollout> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      const id = randomUUID();
+      let result: SqlResult<RolloutRow>;
+      try {
+        result = await tx.query<RolloutRow>(`INSERT INTO model_rollouts (id, model_id, model_version, state, traffic_percentage, minimum_samples, maximum_error_rate, maximum_average_latency_ms) VALUES ($1, $2, $3, 'canary', $4, $5, $6, $7) RETURNING ${rolloutColumns}`, [id, input.modelId, input.modelVersion, input.trafficPercentage, input.minimumSamples, input.maximumErrorRate, input.maximumAverageLatencyMs]);
+      } catch (error) {
+        if ((error as { code?: string }).code === '23505') throw new RouterError('A canary already exists for this model', 'rollout_conflict', 409, false);
+        throw error;
+      }
+      const row = result.rows[0]; if (!row) throw new Error('Rollout insert returned no row');
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'rollout.start', `rollout:${id}`, { modelId: input.modelId, modelVersion: input.modelVersion, trafficPercentage: input.trafficPercentage });
+      return modelRollout(row);
+    });
+  }
+
+  async rollout(id: string): Promise<ModelRollout | undefined> {
+    const result = await this.db.query<RolloutRow>(`SELECT ${rolloutColumns} FROM model_rollouts WHERE id = $1`, [id]);
+    return result.rows[0] ? modelRollout(result.rows[0]) : undefined;
+  }
+
+  async runtimeRollouts(): Promise<readonly ModelRollout[]> {
+    const result = await this.db.query<RolloutRow>(`SELECT DISTINCT ON (model_id) ${rolloutColumns} FROM model_rollouts ORDER BY model_id, created_at DESC, id DESC`);
+    return result.rows.map(modelRollout);
+  }
+
+  async changeRollout(input: { id: string; action: 'promote' | 'rollback'; reason?: string; actorCredentialId: string; actorTenantId: string }): Promise<ModelRollout> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      const current = await tx.query<RolloutRow>(`SELECT ${rolloutColumns} FROM model_rollouts WHERE id = $1 AND state = 'canary' FOR UPDATE`, [input.id]);
+      const currentRow = current.rows[0];
+      if (!currentRow) throw new RouterError('Canary rollout was not found or is no longer mutable', 'rollout_not_mutable', 409, false);
+      const currentRollout = modelRollout(currentRow);
+      if (input.action === 'promote' && (currentRollout.sampleCount < currentRollout.minimumSamples || currentRollout.errorCount / currentRollout.sampleCount > currentRollout.maximumErrorRate || currentRollout.totalLatencyMs / currentRollout.sampleCount > currentRollout.maximumAverageLatencyMs)) throw new RouterError('Canary has not met its minimum sample and health thresholds', 'rollout_not_ready', 409, false);
+      const state = input.action === 'promote' ? 'active' : 'rolled_back';
+      const result = await tx.query<RolloutRow>(`UPDATE model_rollouts SET state = $2, reason = $3, updated_at = now() WHERE id = $1 AND state = 'canary' RETURNING ${rolloutColumns}`, [input.id, state, input.reason ?? null]);
+      const row = result.rows[0];
+      if (!row) throw new RouterError('Canary rollout changed concurrently', 'rollout_not_mutable', 409, false);
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, `rollout.${input.action}`, `rollout:${input.id}`, { reason: input.reason ?? null });
+      return modelRollout(row);
+    });
+  }
+
+  async recordRolloutOutcome(outcome: RolloutOutcome): Promise<ModelRollout | undefined> {
+    if (outcome.status === 'cancelled') {
+      const current = await this.db.query<RolloutRow>(`SELECT ${rolloutColumns} FROM model_rollouts WHERE model_id = $1 AND model_version = $2 AND state = 'canary' ORDER BY created_at DESC LIMIT 1`, [outcome.modelId, outcome.modelVersion]);
+      return current.rows[0] ? modelRollout(current.rows[0]) : undefined;
+    }
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      const failed = outcome.status === 'error' ? 1 : 0;
+      const result = await tx.query<RolloutRow>(`UPDATE model_rollouts SET sample_count = sample_count + 1, error_count = error_count + $3, total_latency_ms = total_latency_ms + $4, state = CASE WHEN sample_count + 1 >= minimum_samples AND (((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate OR ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms) THEN 'rolled_back' ELSE state END, reason = CASE WHEN sample_count + 1 >= minimum_samples AND ((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate THEN 'error_rate_exceeded' WHEN sample_count + 1 >= minimum_samples AND ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms THEN 'average_latency_exceeded' ELSE reason END, updated_at = now() WHERE model_id = $1 AND model_version = $2 AND state = 'canary' RETURNING ${rolloutColumns}`, [outcome.modelId, outcome.modelVersion, failed, Math.max(0, outcome.latencyMs)]);
+      const row = result.rows[0]; if (!row) return undefined;
+      const rollout = modelRollout(row);
+      if (rollout.state === 'rolled_back') await this.appendAudit(tx, 'system', 'platform', 'rollout.auto_rollback', `rollout:${rollout.id}`, { reason: rollout.reason, sampleCount: rollout.sampleCount, errorRate: rollout.errorCount / rollout.sampleCount, averageLatencyMs: rollout.totalLatencyMs / rollout.sampleCount });
+      return rollout;
+    });
+  }
 
   private async appendAudit(db: SqlClient, actorCredentialId: string, actorTenantId: string, action: AuditEvent['action'], target: string, details: Record<string, unknown>): Promise<void> {
     await db.query('INSERT INTO admin_audit_events (id, actor_credential_id, actor_tenant_id, action, target, details) VALUES ($1, $2, $3, $4, $5, $6)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);

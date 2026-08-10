@@ -20,6 +20,7 @@ describe('managed database migrations', () => {
     expect(queries.some((query) => query.includes('lease_expires_at'))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS admin_audit_events'))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS model_promotion_evidence'))).toBe(true);
-    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(6);
+    expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS model_rollouts'))).toBe(true);
+    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(7);
   });
 });

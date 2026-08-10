@@ -20,7 +20,8 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
   });
 
   beforeEach(async () => {
-    await db.query("DELETE FROM admin_audit_events WHERE actor_credential_id = 'control-admin'");
+    await db.query("DELETE FROM admin_audit_events WHERE actor_credential_id = 'control-admin' OR target LIKE 'rollout:%'");
+    await db.query("DELETE FROM model_rollouts WHERE model_id LIKE 'control-%'");
     await db.query("DELETE FROM model_promotion_evidence WHERE submitted_by_credential_id = 'control-admin'");
     await db.query('DELETE FROM model_manifests');
     await db.query('DELETE FROM model_registry_snapshots');
@@ -64,6 +65,22 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const budget = await control.budgetFor('control-tenant');
     expect(budget.reservedUsd + budget.spentUsd).toBeLessThanOrEqual(budget.limitUsd ?? Number.POSITIVE_INFINITY);
+  });
+
+  it('atomically rolls back a failing canary once across concurrent outcomes', async () => {
+    const rollout = await control.createRollout({ modelId: 'control-canary', modelVersion: '2', trafficPercentage: 10, minimumSamples: 20, maximumErrorRate: 0.1, maximumAverageLatencyMs: 1_000, actorCredentialId: 'control-admin', actorTenantId: 'platform' });
+    const outcomes = await Promise.all(Array.from({ length: 20 }, () => control.recordRolloutOutcome({ modelId: 'control-canary', modelVersion: '2', status: 'error', latencyMs: 10 })));
+    expect(outcomes.filter((entry) => entry?.state === 'rolled_back')).toHaveLength(1);
+    await expect(control.rollout(rollout.id)).resolves.toMatchObject({ state: 'rolled_back', reason: 'error_rate_exceeded', sampleCount: 20, errorCount: 20 });
+    const audits = await control.listAudit(100);
+    expect(audits.filter((event) => event.action === 'rollout.auto_rollback' && event.target === `rollout:${rollout.id}`)).toHaveLength(1);
+  });
+
+  it('serializes manual promotion behind canary acceptance thresholds', async () => {
+    const rollout = await control.createRollout({ modelId: 'control-healthy', modelVersion: '2', trafficPercentage: 10, minimumSamples: 20, maximumErrorRate: 0.1, maximumAverageLatencyMs: 1_000, actorCredentialId: 'control-admin', actorTenantId: 'platform' });
+    await expect(control.changeRollout({ id: rollout.id, action: 'promote', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'rollout_not_ready' });
+    await Promise.all(Array.from({ length: 20 }, () => control.recordRolloutOutcome({ modelId: 'control-healthy', modelVersion: '2', status: 'success', latencyMs: 100 })));
+    await expect(control.changeRollout({ id: rollout.id, action: 'promote', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).resolves.toMatchObject({ state: 'active', sampleCount: 20 });
   });
 
   it('rejects a limit below already consumed and reserved usage', async () => {

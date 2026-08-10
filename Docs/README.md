@@ -31,6 +31,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Control-plane operations](23-control-plane-operations.md)
 - [Operational observability](24-operational-observability.md)
 - [Model promotion gates](25-model-promotion-gates.md)
+- [Controlled canary rollouts](26-controlled-rollouts.md)
 
 ## Decision status vocabulary
 

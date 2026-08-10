@@ -28,6 +28,13 @@ const evidenceSchema = z.object({
   routingPassRate: z.number().min(0).max(1), qualityScore: z.number().min(0).max(1), sampleCount: z.number().int().nonnegative(),
   evaluatedAt: z.string().datetime(), expiresAt: z.string().datetime(),
 }).strict();
+const rolloutSchema = z.object({
+  modelId: evidenceSchema.shape.modelId, modelVersion: evidenceSchema.shape.modelVersion,
+  trafficPercentage: z.number().positive().max(100), minimumSamples: z.number().int().min(20).max(10_000_000),
+  maximumErrorRate: z.number().min(0).max(1), maximumAverageLatencyMs: z.number().positive().max(3_600_000),
+}).strict();
+const rolloutIdSchema = z.string().uuid();
+const rolloutActionSchema = z.object({ id: rolloutIdSchema, action: z.enum(['promote', 'rollback']), reason: z.string().min(1).max(500).optional() }).strict();
 
 function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): RequestPrincipal {
   const principal = authenticator?.authenticate(authorization);
@@ -101,6 +108,30 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
     try {
       requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       return await service.assessCandidate(modelSchema.parse(request.body) as ModelConfiguration);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/model-rollouts', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      return reply.code(201).send(await service.createRollout(rolloutSchema.parse(request.body), actor));
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get<{ Params: { id: string } }>('/v1/admin/model-rollouts/:id', async (request, reply) => {
+    try {
+      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      const rollout = await service.rollout(rolloutIdSchema.parse(request.params.id));
+      if (!rollout) return reply.code(404).send({ error: { code: 'not_found', message: 'Model rollout was not found' } });
+      return rollout;
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/model-rollout-actions', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const input = rolloutActionSchema.parse(request.body);
+      return await service.changeRollout(input.id, input.action, input.reason, actor);
     } catch (error) { return sendError(reply, error); }
   });
 }
