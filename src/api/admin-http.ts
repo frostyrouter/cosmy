@@ -10,6 +10,12 @@ const modelSchema = z.object({
   capabilities: z.array(z.enum(['streaming', 'tools', 'structured-output', 'vision', 'reasoning'])).max(5),
   modalities: z.array(z.enum(['text', 'image', 'audio', 'video', 'file'])).min(1).max(5),
   coordinates: z.object({ technicality: z.number().min(0).max(1), creativity: z.number().min(0).max(1), quality: z.number().min(0).max(1), reasoning: z.number().min(0).max(1) }).strict(),
+  capabilityVector: z.object({
+    version: z.literal('v1'), technicalDifficulty: z.number().finite().min(0).max(1), reasoningDepth: z.number().finite().min(0).max(1),
+    creativity: z.number().finite().min(0).max(1), designSkill: z.number().finite().min(0).max(1), factualPrecision: z.number().finite().min(0).max(1),
+    ambiguity: z.number().finite().min(0).max(1), toolComplexity: z.number().finite().min(0).max(1), contextComplexity: z.number().finite().min(0).max(1),
+    codingIntensity: z.number().finite().min(0).max(1), safetyStakes: z.number().finite().min(0).max(1),
+  }).strict(),
   pricing: z.object({ inputPerMillionUsd: z.number().nonnegative(), outputPerMillionUsd: z.number().nonnegative(), cachedInputPerMillionUsd: z.number().nonnegative().optional() }).strict(),
   contextWindow: z.number().int().positive(), maxOutputTokens: z.number().int().positive(), regions: z.array(z.string().min(1).max(64)).min(1),
   allowedDataClasses: z.array(z.enum(['public', 'internal', 'confidential', 'restricted'])).min(1).max(4),

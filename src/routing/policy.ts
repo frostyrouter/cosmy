@@ -82,7 +82,7 @@ function effectiveQualityFloor(features: RequestFeatures, hints: PolicyHints): n
 }
 
 export function filterEligible(
-  models: readonly ModelConfiguration[], features: RequestFeatures, hints: PolicyHints = {},
+  models: readonly ModelConfiguration[], features: RequestFeatures, hints: PolicyHints = {}, options: { bypassInferredQualityFloor?: boolean } = {},
 ): EligibilityResult {
   const eligible: ModelConfiguration[] = [];
   const rejected: Rejection[] = [];
@@ -101,7 +101,10 @@ export function filterEligible(
     const estimatedCostUsd = cost(model, features);
     if (hints.maxCostUsd !== undefined && estimatedCostUsd > hints.maxCostUsd) { reject(rejected, model, 'max_cost_exceeded'); continue; }
     if (hints.maxLatencyMs !== undefined && model.health.latencyP95Ms > hints.maxLatencyMs) { reject(rejected, model, 'max_latency_exceeded'); continue; }
-    if (predictedTaskQuality(features, model) < effectiveQualityFloor(features, hints)) { reject(rejected, model, 'quality_floor'); continue; }
+    const qualityFloor = options.bypassInferredQualityFloor
+      ? (hints.minQuality ?? 0)
+      : effectiveQualityFloor(features, hints);
+    if (predictedTaskQuality(features, model) < qualityFloor) { reject(rejected, model, 'quality_floor'); continue; }
     eligible.push(model);
   }
   return { eligible, rejected };

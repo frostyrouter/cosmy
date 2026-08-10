@@ -153,5 +153,5 @@ This file is the shared implementation record for the Cosmy router. New feature 
 - Change: Added the post-ranking deep-reasoning gate so an initially selected non-reasoning model is promoted to the next cheapest eligible reasoning-capable model.
 - Impact: `/v1/responses` can now choose the cheapest model predicted to meet the requested quality while retaining hard policy, latency, cost, capability, cancellation, and fallback guarantees.
 - Files or subsystems: Domain contracts, routing features/policy/router, model registry, classifier/provider configuration, service/API wiring, documentation, and unit/integration tests.
-- Validation: 65 fake-provider/fake-classifier tests passed with no paid model calls; TypeScript lint, production build, and diff whitespace validation also passed.
+- Validation: 128 project tests passed (13 PostgreSQL integration tests skipped without a database) with no paid model calls; TypeScript lint, production build, and diff whitespace validation also passed.
 - Limitations and follow-up: Model quality and capability vectors are configured priors until production evaluation profiles calibrate them. Classifier cost/usage telemetry and shared production health snapshots remain follow-up work.

@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/server.ts",
     "start": "node dist/src/server.js",
-    "test": "vitest run --testTimeout=15000",
+    "test": "vitest run test/*.test.ts --testTimeout=15000",
     "test:watch": "vitest",
     "integration:smoke": "node scripts/integration-smoke.mjs",
     "lint": "tsc -p tsconfig.json --noEmit"

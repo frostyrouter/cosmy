@@ -111,7 +111,7 @@ export class DeterministicRouter {
       const explicit = this.registry.get(request.model);
       if (!explicit) throw new NoRouteError(`Requested model '${request.model}' is not registered`);
       if (this.admission && !this.admission.allows(explicit, tenantId)) throw new NoRouteError('Requested model is not assigned to this tenant rollout', [{ modelId: explicit.id, reason: 'rollout_not_assigned' }]);
-      const eligibility = filterEligible([explicit], features, request.policy);
+      const eligibility = filterEligible([explicit], features, request.policy, { bypassInferredQualityFloor: true });
       if (eligibility.eligible.length === 0) throw new NoRouteError('Requested model cannot satisfy this request', eligibility.rejected);
       const selected = rankCandidates(eligibility.eligible, features, request.policy, this.policy)[0];
       if (!selected) throw new NoRouteError('Requested model cannot satisfy this request');
