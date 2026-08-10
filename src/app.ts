@@ -105,6 +105,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const rolloutObserver = controlStore ? {
     recordOutcome: async (outcome: RolloutOutcome) => {
       const before = rolloutRegistry.get(outcome.modelId);
+      if (!before || before.state !== 'canary' || before.modelVersion !== outcome.modelVersion) return;
       const updated = await controlStore.recordRolloutOutcome(outcome);
       if (updated) rolloutRegistry.upsert(updated);
       if (before?.state === 'canary' && updated?.state === 'rolled_back') metrics.increment?.('rollout_auto_rollback');

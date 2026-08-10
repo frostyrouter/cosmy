@@ -49,7 +49,7 @@ Cache keys include the selected immutable model ID/version, so a response produc
 
 PostgreSQL increments sample, error, and latency totals in one conditional update. At the minimum sample count, the same statement changes `canary` to `rolled_back` when error rate or average latency exceeds its threshold. Only the transaction that performs the transition writes `rollout.auto_rollback`, so concurrent routers cannot create duplicate rollback decisions.
 
-Routers update local admission immediately after their own outcome and poll durable rollout state with the registry refresh loop for cross-instance convergence. Metrics expose `rollout_auto_rollback` and `rollout_observation_failure`; observation storage failure never replaces the caller's provider result.
+Routers write observations only for the exact locally known canary version, update local admission immediately after their own outcome, and poll durable rollout state with the registry refresh loop for cross-instance convergence. The data plane waits at most 100 ms for best-effort observation persistence; a stalled control-plane query cannot hold an already completed provider response or stream open. Metrics expose `rollout_auto_rollback` and `rollout_observation_failure`; timeout or storage failure never replaces the caller's provider result.
 
 ## Operator checklist
 

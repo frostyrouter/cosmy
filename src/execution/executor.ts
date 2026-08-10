@@ -201,7 +201,8 @@ export class RequestExecutor {
   }
 
   private async recordRolloutOutcome(model: ModelConfiguration, status: 'success' | 'error' | 'cancelled', latencyMs: number): Promise<void> {
-    try { await this.rolloutOutcomes?.recordOutcome({ modelId: model.id, modelVersion: model.version, status, latencyMs }); } catch { this.metrics?.increment?.('rollout_observation_failure'); }
+    if (!this.rolloutOutcomes) return;
+    try { await settleWithin(this.rolloutOutcomes.recordOutcome({ modelId: model.id, modelVersion: model.version, status, latencyMs }), 100); } catch { this.metrics?.increment?.('rollout_observation_failure'); }
   }
 }
 
