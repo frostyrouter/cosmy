@@ -2,6 +2,15 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-12 - Live health admission and structured-output enforcement (commit pending)
+
+- Change: Connected execution health observations back into routing. Three consecutive failures temporarily reject a model with `observed_health_unavailable`; successful probes restore it, and explicit unhealthy model requests fail instead of silently changing models.
+- Change: Added deterministic non-streaming JSON-schema verification and validation-driven fallback. Invalid outputs are reconciled at actual cost, do not poison transport health, and can escalate only through pre-ranked eligible alternatives while staying within the request's total `maxCostUsd` ceiling. Unsupported schema keywords fail before provider execution.
+- Impact: Repeatedly failing providers stop receiving fresh automatic traffic, and a provider can no longer return malformed or schema-incompatible output as a successful structured response.
+- Files: Health store contracts/implementation, router composition and admission, executor/error contracts, structured-output validator, regressions, and operator documentation.
+- Validation: 154 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Health remains process-local and uses configured p95 latency as its percentile baseline. Post-generation validation cannot safely replay an already emitted stream; streaming schema enforcement remains provider-native. `$ref`, conditional schemas, formats, and other unsupported JSON Schema vocabulary are rejected rather than partially enforced.
+
 ## 2026-08-12 - Durable routing decisions and query APIs
 
 - Change: Added tenant-scoped planned and terminal decision records plus `GET /v1/routing/decisions/:id`, deterministic non-executing `POST /v1/routing/simulate`, and rollout-visible `GET /v1/models` APIs behind the new `routing:read` scope.

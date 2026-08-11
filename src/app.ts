@@ -17,7 +17,7 @@ import { InMemoryMetrics } from './observability/metrics.js';
 import { resolveConfig, type AppConfigInput } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
 import type { RequestClassifier } from './ports/classifier.js';
-import type { BudgetAdministration, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
+import type { BudgetAdministration, HealthSnapshotStore, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
 import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
 import { PostgresControlPlaneStore, PostgresDecisionStore, PostgresIdempotencyStore, PostgresRegistryRepository, PostgresReservationRepository } from './persistence/sql-adapters.js';
@@ -127,6 +127,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     classifierTimeoutMs: config.classifierTimeoutMs ?? 3_000,
     failureMode: classifierMode === 'fail' ? 'fail' : 'degrade',
     admission: rolloutRegistry,
+    ...(isHealthSnapshotStore(health) ? { health } : {}),
   });
   const rolloutObserver = controlStore ? {
     recordOutcome: async (outcome: RolloutOutcome) => {
@@ -204,4 +205,8 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
 function isBudgetAdministration(usage: UsageLedger): usage is UsageLedger & BudgetAdministration {
   const candidate = usage as Partial<BudgetAdministration>;
   return typeof candidate.budgetFor === 'function' && typeof candidate.setBudget === 'function';
+}
+
+function isHealthSnapshotStore(health: HealthStore): health is HealthSnapshotStore {
+  return typeof (health as Partial<HealthSnapshotStore>).snapshot === 'function';
 }

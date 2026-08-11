@@ -40,4 +40,4 @@ Streaming retries are allowed only before the first output delta. Once visible o
 
 ## Production requirements
 
-The in-memory breaker is appropriate for one process and local development. A multi-instance deployment should replace it with a shared or instance-aware health store, otherwise each worker will learn provider health independently. Retry budgets should also be bounded per tenant and provider to avoid retry storms.
+The in-memory breaker and health snapshot are appropriate for one process and local development. Repeated observed failures now remove a model from subsequent local route decisions during a cooldown, but a multi-instance deployment should replace the snapshot with a shared or instance-aware health store; otherwise each worker learns provider health independently. Retry budgets should also be bounded per tenant and provider to avoid retry storms.

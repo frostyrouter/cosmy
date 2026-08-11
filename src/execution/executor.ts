@@ -2,9 +2,10 @@ import { performance } from 'node:perf_hooks';
 import type { ProviderAdapter } from '../ports/provider.js';
 import type { HealthStore, UsageLedger, UsageReservation } from '../ports/stores.js';
 import type { ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
-import { ProviderError, RequestCancelledError, RouterError } from '../domain/errors.js';
+import { InvalidRequestError, OutputValidationError, ProviderError, RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { MetricsSink } from '../observability/metrics.js';
 import type { RolloutOutcomeRecorder } from '../rollouts/rollout.js';
+import { unsupportedSchemaKeywords, validateStructuredOutput } from './structured-output.js';
 
 export interface ExecutionOptions {
   requestId: string;
@@ -36,6 +37,11 @@ export class RequestExecutor {
 
   async execute(options: ExecutionOptions): Promise<ResponseResult> {
     const { request, route, requestId, signal } = options;
+    const responseSchema = request.responseFormat?.type === 'json-schema' ? request.responseFormat.schema ?? { type: 'object' } : undefined;
+    if (responseSchema) {
+      const unsupported = unsupportedSchemaKeywords(responseSchema);
+      if (unsupported.length) throw new InvalidRequestError(`Unsupported response schema: ${unsupported[0]}`);
+    }
     const deadline = this.requestTimeoutMs !== undefined ? abortAfter(signal, this.requestTimeoutMs) : undefined;
     const effective = deadline?.signal ?? signal;
     try {
@@ -43,13 +49,19 @@ export class RequestExecutor {
       if (route.alternatives.length === 0) return await this.executeCandidate({ requestId, route, request, signal: effective, fallbackIndex: 0 });
       const candidates = [route.selected, ...route.alternatives];
       let lastError: unknown;
+      let validationCostUsd = 0;
       for (const [fallbackIndex, candidate] of candidates.entries()) {
+        if (fallbackIndex > 0 && request.policy?.maxCostUsd !== undefined && validationCostUsd + candidate.estimatedCostUsd > request.policy.maxCostUsd) {
+          throw lastError instanceof Error ? lastError : new OutputValidationError('Structured output validation failed within the request cost ceiling', validationCostUsd, []);
+        }
         const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
         try {
           return await this.executeCandidate({ requestId, route: attemptRoute, request, signal: effective, fallbackIndex });
         } catch (error) {
           lastError = error;
-          if (request.policy?.allowFallback === false || !(error instanceof ProviderError) || !error.retryable || fallbackIndex === candidates.length - 1) throw error;
+          if (error instanceof OutputValidationError) validationCostUsd += error.actualCostUsd;
+          const canFallback = (error instanceof ProviderError && error.retryable) || error instanceof OutputValidationError;
+          if (request.policy?.allowFallback === false || !canFallback || fallbackIndex === candidates.length - 1) throw error;
         }
       }
       throw lastError instanceof Error ? lastError : new ProviderError('All route candidates failed');
@@ -67,6 +79,10 @@ export class RequestExecutor {
     this.metrics?.streamOpened?.();
     try {
       const { request, route, requestId, signal } = options;
+      if (request.responseFormat?.type === 'json-schema') {
+        const unsupported = unsupportedSchemaKeywords(request.responseFormat.schema ?? { type: 'object' });
+        if (unsupported.length) throw new InvalidRequestError(`Unsupported response schema: ${unsupported[0]}`);
+      }
       if (signal.aborted) throw new RequestCancelledError();
       if (route.alternatives.length === 0) {
         for await (const chunk of this.streamCandidate({ requestId, route, request, signal, fallbackIndex: 0 })) yield chunk;
@@ -113,10 +129,19 @@ export class RequestExecutor {
       const latencyMs = performance.now() - started;
       this.health.markSuccess(route.selected.model.id, latencyMs);
       await this.reconcileBestEffort(reservation, response.usage.estimatedCostUsd);
+      if (request.responseFormat?.type === 'json-schema') {
+        const issues = validateStructuredOutput(response.output, request.responseFormat.schema ?? { type: 'object' });
+        if (issues.length) {
+          this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'error', latencyMs, usage: response.usage, fallbackIndex });
+          await this.recordRolloutOutcome(route.selected.model, 'error', latencyMs);
+          throw new OutputValidationError('Provider output did not satisfy the requested JSON schema', response.usage.estimatedCostUsd, issues);
+        }
+      }
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: response.usage, fallbackIndex });
       await this.recordRolloutOutcome(route.selected.model, 'success', latencyMs);
       return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
+      if (error instanceof OutputValidationError) throw error;
       const latencyMs = performance.now() - started;
       if (!(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       await this.reconcileBestEffort(reservation, 0);

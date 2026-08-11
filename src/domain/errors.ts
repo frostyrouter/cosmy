@@ -27,6 +27,12 @@ export class ProviderError extends RouterError {
   }
 }
 
+export class OutputValidationError extends RouterError {
+  constructor(message: string, public readonly actualCostUsd: number, public readonly issues: readonly string[]) {
+    super(message, 'output_validation_failed', 502, true);
+  }
+}
+
 export class RequestCancelledError extends RouterError {
   constructor() { super('Request was cancelled', 'request_cancelled', 499); }
 }

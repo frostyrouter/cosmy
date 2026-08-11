@@ -51,6 +51,7 @@ export interface ModelHealthSnapshot {
   modelId: string;
   successes: number;
   failures: number;
+  consecutiveFailures: number;
   lastLatencyMs?: number;
   updatedAt: string;
 }
