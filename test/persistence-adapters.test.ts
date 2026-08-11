@@ -47,6 +47,27 @@ describe('durable persistence adapters', () => {
     expect(queries).toEqual(expect.arrayContaining([expect.stringContaining('statement_timeout'), expect.stringContaining('lock_timeout'), expect.stringContaining('UPDATE model_rollouts')]));
   });
 
+  it('retries bounded PostgreSQL lock contention without double-counting an outcome', async () => {
+    let transactions = 0;
+    let updates = 0;
+    const primary: SqlClient = { query: async () => { throw new Error('primary pool must not be used'); } };
+    const rollout: SqlClient = {
+      query: async <Row>(text: string) => {
+        if (!text.startsWith('UPDATE model_rollouts')) return { rows: [] as Row[] };
+        updates += 1;
+        return { rows: [{ id: 'r1', model_id: 'candidate', model_version: '2', state: 'canary', traffic_percentage: 5, minimum_samples: 20, maximum_error_rate: 0.1, maximum_average_latency_ms: 1000, sample_count: '1', error_count: '0', total_latency_ms: 20, reason: null, created_at: '2026-08-10T00:00:00Z', updated_at: '2026-08-10T00:00:01Z' }] as Row[] };
+      },
+      transaction: async (work) => {
+        transactions += 1;
+        if (transactions < 3) throw Object.assign(new Error('lock timeout'), { code: '55P03' });
+        return work(rollout);
+      },
+    };
+    await expect(new PostgresControlPlaneStore(primary, rollout).recordRolloutOutcome({ modelId: 'candidate', modelVersion: '2', status: 'success', latencyMs: 20 })).resolves.toMatchObject({ sampleCount: 1 });
+    expect(transactions).toBe(3);
+    expect(updates).toBe(1);
+  });
+
   it('enforces a tenant budget inside the reservation transaction', async () => {
     const queries: string[] = [];
     const db: SqlClient = {

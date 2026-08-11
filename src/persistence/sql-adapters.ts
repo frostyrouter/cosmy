@@ -24,6 +24,18 @@ interface EvidenceRow { id: string; model_id: string; model_version: string; sui
 interface RolloutRow { id: string; model_id: string; model_version: string; state: ModelRollout['state']; traffic_percentage: number; minimum_samples: number; maximum_error_rate: number; maximum_average_latency_ms: number; sample_count: string | number; error_count: string | number; total_latency_ms: number; reason: string | null; created_at: string; updated_at: string; }
 interface ShadowCampaignRow { id: string; model_id: string; model_version: string; state: ShadowCampaign['state']; sample_percentage: number; budget_limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; allowed_data_classes: ShadowCampaign['allowedDataClasses']; sample_count: string | number; success_count: string | number; error_count: string | number; created_at: string; updated_at: string; }
 
+const rolloutContentionAttempts = 6;
+
+function retryableRolloutContention(error: unknown): boolean {
+  const code = (error as { code?: string }).code;
+  return code === '55P03' || code === '57014';
+}
+
+function rolloutBackoff(attempt: number): Promise<void> {
+  const delayMs = Math.min(40, 5 * (2 ** attempt)) + Math.floor(Math.random() * 6);
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
 }
@@ -287,16 +299,26 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
       return current.rows[0] ? modelRollout(current.rows[0]) : undefined;
     }
     if (!this.rolloutDb.transaction) throw new Error('PostgresControlPlaneStore rollout observations require transactional SQL client');
-    return this.rolloutDb.transaction(async (tx) => {
-      await tx.query("SET LOCAL statement_timeout = '100ms'");
-      await tx.query("SET LOCAL lock_timeout = '75ms'");
-      const failed = outcome.status === 'error' ? 1 : 0;
-      const result = await tx.query<RolloutRow>(`UPDATE model_rollouts SET sample_count = sample_count + 1, error_count = error_count + $3, total_latency_ms = total_latency_ms + $4, state = CASE WHEN sample_count + 1 >= minimum_samples AND (((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate OR ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms) THEN 'rolled_back' ELSE state END, reason = CASE WHEN sample_count + 1 >= minimum_samples AND ((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate THEN 'error_rate_exceeded' WHEN sample_count + 1 >= minimum_samples AND ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms THEN 'average_latency_exceeded' ELSE reason END, updated_at = now() WHERE model_id = $1 AND model_version = $2 AND state = 'canary' RETURNING ${rolloutColumns}`, [outcome.modelId, outcome.modelVersion, failed, Math.max(0, outcome.latencyMs)]);
-      const row = result.rows[0]; if (!row) return undefined;
-      const rollout = modelRollout(row);
-      if (rollout.state === 'rolled_back') await this.appendAudit(tx, 'system', 'platform', 'rollout.auto_rollback', `rollout:${rollout.id}`, { reason: rollout.reason, sampleCount: rollout.sampleCount, errorRate: rollout.errorCount / rollout.sampleCount, averageLatencyMs: rollout.totalLatencyMs / rollout.sampleCount });
-      return rollout;
-    });
+    let lastContention: unknown;
+    for (let attempt = 0; attempt < rolloutContentionAttempts; attempt += 1) {
+      try {
+        return await this.rolloutDb.transaction(async (tx) => {
+          await tx.query("SET LOCAL statement_timeout = '100ms'");
+          await tx.query("SET LOCAL lock_timeout = '75ms'");
+          const failed = outcome.status === 'error' ? 1 : 0;
+          const result = await tx.query<RolloutRow>(`UPDATE model_rollouts SET sample_count = sample_count + 1, error_count = error_count + $3, total_latency_ms = total_latency_ms + $4, state = CASE WHEN sample_count + 1 >= minimum_samples AND (((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate OR ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms) THEN 'rolled_back' ELSE state END, reason = CASE WHEN sample_count + 1 >= minimum_samples AND ((error_count + $3)::double precision / (sample_count + 1)) > maximum_error_rate THEN 'error_rate_exceeded' WHEN sample_count + 1 >= minimum_samples AND ((total_latency_ms + $4) / (sample_count + 1)) > maximum_average_latency_ms THEN 'average_latency_exceeded' ELSE reason END, updated_at = now() WHERE model_id = $1 AND model_version = $2 AND state = 'canary' RETURNING ${rolloutColumns}`, [outcome.modelId, outcome.modelVersion, failed, Math.max(0, outcome.latencyMs)]);
+          const row = result.rows[0]; if (!row) return undefined;
+          const rollout = modelRollout(row);
+          if (rollout.state === 'rolled_back') await this.appendAudit(tx, 'system', 'platform', 'rollout.auto_rollback', `rollout:${rollout.id}`, { reason: rollout.reason, sampleCount: rollout.sampleCount, errorRate: rollout.errorCount / rollout.sampleCount, averageLatencyMs: rollout.totalLatencyMs / rollout.sampleCount });
+          return rollout;
+        });
+      } catch (error) {
+        if (!retryableRolloutContention(error) || attempt === rolloutContentionAttempts - 1) throw error;
+        lastContention = error;
+        await rolloutBackoff(attempt);
+      }
+    }
+    throw lastContention;
   }
 
   async createShadowCampaign(input: Omit<ShadowCampaign, 'id' | 'state' | 'reservedUsd' | 'spentUsd' | 'sampleCount' | 'successCount' | 'errorCount' | 'createdAt' | 'updatedAt'> & { actorCredentialId: string; actorTenantId: string }): Promise<ShadowCampaign> {

@@ -14,7 +14,7 @@ import { registerRoutes } from './api/http.js';
 import { registerAdminRoutes } from './api/admin-http.js';
 import { registerDiagnosticsRoute, registerMetricsRoute } from './api/metrics-http.js';
 import { InMemoryMetrics } from './observability/metrics.js';
-import { loadConfig, type AppConfig } from './config.js';
+import { resolveConfig, type AppConfigInput } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
 import type { RequestClassifier } from './ports/classifier.js';
 import type { BudgetAdministration, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
@@ -43,7 +43,9 @@ export interface AppDependencies {
   env?: NodeJS.ProcessEnv;
 }
 
-export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
+export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: AppDependencies = {}): Promise<FastifyInstance> {
+  const configEnv = dependencies.env ?? (inputConfig.environment === 'test' ? {} : process.env);
+  const config = resolveConfig(inputConfig, configEnv);
   // Explicit test configuration must never inherit ambient credentials and make paid calls.
   const runtimeEnv = dependencies.env ?? (config.environment === 'test' ? {} : process.env);
   const availableClassifier = dependencies.classifier === undefined ? configuredClassifier(runtimeEnv) : dependencies.classifier ?? undefined;

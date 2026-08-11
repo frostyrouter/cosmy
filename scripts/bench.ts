@@ -5,6 +5,11 @@ import { buildApp } from '../src/app.js';
 const TOTAL = Number(process.env.BENCH_TOTAL ?? 20_000);
 const CONCURRENCY = Number(process.env.BENCH_CONCURRENCY ?? 64);
 const PAYLOAD = process.env.BENCH_PAYLOAD ?? 'simple';
+const BENCH_ENV = process.env.BENCH_ENV ?? 'test';
+
+if (!Number.isInteger(TOTAL) || TOTAL <= 0) throw new Error('BENCH_TOTAL must be a positive integer');
+if (!Number.isInteger(CONCURRENCY) || CONCURRENCY <= 0) throw new Error('BENCH_CONCURRENCY must be a positive integer');
+if (!['development', 'test', 'production'].includes(BENCH_ENV)) throw new Error('BENCH_ENV must be development, test, or production');
 
 function makeBody(): object {
   if (PAYLOAD === 'large') {
@@ -18,17 +23,18 @@ function makeBody(): object {
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   const index = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-  return sorted[index];
+  return sorted[index]!;
 }
 
-const app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: process.env.BENCH_LOG_LEVEL ?? 'silent', environment: process.env.BENCH_ENV ?? 'test', rateLimitMax: Number(process.env.BENCH_RATE_LIMIT_MAX ?? 100_000) });
+const app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: process.env.BENCH_LOG_LEVEL ?? 'silent', environment: BENCH_ENV as 'development' | 'test' | 'production', rateLimitMax: Number(process.env.BENCH_RATE_LIMIT_MAX ?? 100_000) });
 await app.listen({ host: '127.0.0.1', port: 0 });
 const port = (app.server.address() as { port: number }).port;
 const url = `http://127.0.0.1:${port}/v1/responses`;
 const body = makeBody();
 
 for (let i = 0; i < 200; i++) {
-  await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  await response.arrayBuffer();
 }
 
 const latencies: number[] = [];
@@ -52,6 +58,7 @@ async function worker(): Promise<void> {
     try {
       const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
       if (response.status !== 200) errors.push(response.status);
+      await response.arrayBuffer();
     } catch {
       errors.push(0);
     }
@@ -64,7 +71,8 @@ const elapsedMs = performance.now() - started;
 
 if (profiler) {
   const { profile } = await profiler.post('Profiler.stop');
-  await import('node:fs/promises').then((fs) => fs.writeFile(process.env.BENCH_PROFILE, JSON.stringify(profile)));
+  const profilePath = process.env.BENCH_PROFILE;
+  if (profilePath) await import('node:fs/promises').then((fs) => fs.writeFile(profilePath, JSON.stringify(profile)));
   profiler.disconnect();
 }
 latencies.sort((a, b) => a - b);
@@ -84,3 +92,4 @@ console.log(JSON.stringify({
 }, null, 2));
 
 await app.close();
+if (errors.length > 0) process.exitCode = 1;
