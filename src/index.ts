@@ -19,6 +19,7 @@ export * from './evaluation/default-cases.js';
 export * from './persistence/contracts.js';
 export * from './persistence/memory-cache.js';
 export * from './persistence/memory-idempotency.js';
+export * from './persistence/memory-decisions.js';
 export * from './control-plane/service.js';
 export * from './control-plane/memory-store.js';
 export * from './control-plane/promotion.js';

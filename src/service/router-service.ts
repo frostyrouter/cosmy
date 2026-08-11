@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { ResponseChunk, ResponseRequest, ResponseResult } from '../domain/types.js';
+import type { DecisionOutcome, DecisionRecord, ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
 import { requestId } from '../util/ids.js';
 import { DeterministicRouter } from '../routing/router.js';
 import { RequestExecutor } from '../execution/executor.js';
-import { RouterError } from '../domain/errors.js';
-import type { IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
+import { RequestCancelledError, RouterError } from '../domain/errors.js';
+import type { DecisionStore, IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
 import type { MetricsSink } from '../observability/metrics.js';
 import type { ShadowScheduler } from '../shadow/coordinator.js';
 
@@ -47,7 +47,24 @@ export class RouterService {
     private readonly idempotencyTtlSeconds = 86_400,
     private readonly metrics?: MetricsSink,
     private readonly shadows?: ShadowScheduler,
+    private readonly decisions?: DecisionStore,
   ) {}
+
+  async simulate(request: ResponseRequest, signal: AbortSignal): Promise<RouteDecision> {
+    if (signal.aborted) throw new RequestCancelledError();
+    return this.router.decide(request.requestId ?? requestId(), request);
+  }
+
+  listModels(tenantId?: string): readonly ModelConfiguration[] { return this.router.listModels(tenantId); }
+
+  async decision(tenantId: string, decisionId: string): Promise<DecisionRecord | undefined> {
+    if (!this.decisions) return undefined;
+    try { return await this.decisions.get(tenantId, decisionId); }
+    catch {
+      this.metrics?.increment?.('decision_store_failure');
+      throw new RouterError('Unable to read the routing decision', 'decision_store_error', 503, true);
+    }
+  }
 
   async complete(request: ResponseRequest, signal: AbortSignal, idempotencyKey?: string): Promise<ResponseResult> {
     if (!idempotencyKey || !this.idempotency) return this.completeOnce(request, signal);
@@ -83,29 +100,69 @@ export class RouterService {
   private async completeOnce(request: ResponseRequest, signal: AbortSignal): Promise<ResponseResult> {
     const id = request.requestId ?? requestId();
     const route = await this.router.decideAsync(id, request, signal);
+    await this.saveDecision(request, route, 'planned', undefined, undefined, true);
     const cache = this.cache;
-    if (!cache || this.cacheTtlSeconds <= 0 || !cacheEligible(request)) {
-      const result = await this.executor.execute({ requestId: id, route, request, signal }); this.scheduleShadow(request, result); return result;
-    }
-    const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.(), route.selected.model.id, route.selected.model.version);
     try {
-      const cached = await cache.get(key);
-      if (cached) {
-        this.metrics?.increment?.('cache_hit');
-        const result = JSON.parse(cached.value) as ResponseResult;
-        return { ...result, requestId: id, route: { ...result.route, requestId: id } };
+      if (!cache || this.cacheTtlSeconds <= 0 || !cacheEligible(request)) {
+        const result = await this.executor.execute({ requestId: id, route, request, signal });
+        await this.saveCompletedDecision(request, result); this.scheduleShadow(request, result); return result;
       }
-    } catch { this.metrics?.increment?.('cache_failure'); }
-    const result = await this.executor.execute({ requestId: id, route, request, signal });
-    this.scheduleShadow(request, result);
-    try { await cache.set(key, JSON.stringify(result), this.cacheTtlSeconds); } catch { this.metrics?.increment?.('cache_failure'); }
-    return result;
+      const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.(), route.selected.model.id, route.selected.model.version);
+      try {
+        const cached = await cache.get(key);
+        if (cached) {
+          this.metrics?.increment?.('cache_hit');
+          const stored = JSON.parse(cached.value) as ResponseResult;
+          const result = { ...stored, requestId: id, route: { ...stored.route, requestId: id } };
+          await this.saveCompletedDecision(request, result);
+          return result;
+        }
+      } catch { this.metrics?.increment?.('cache_failure'); }
+      const result = await this.executor.execute({ requestId: id, route, request, signal });
+      await this.saveCompletedDecision(request, result); this.scheduleShadow(request, result);
+      try { await cache.set(key, JSON.stringify(result), this.cacheTtlSeconds); } catch { this.metrics?.increment?.('cache_failure'); }
+      return result;
+    } catch (error) {
+      await this.saveFailedDecision(request, route, error);
+      throw error;
+    }
   }
 
   async *stream(request: ResponseRequest, signal: AbortSignal): AsyncIterable<ResponseChunk> {
     const id = request.requestId ?? requestId();
     const route = await this.router.decideAsync(id, request, signal);
-    for await (const chunk of this.executor.stream({ requestId: id, route, request, signal })) yield chunk;
+    await this.saveDecision(request, route, 'planned', undefined, undefined, true);
+    let terminal: ResponseChunk | undefined;
+    try {
+      for await (const chunk of this.executor.stream({ requestId: id, route, request, signal })) { terminal = chunk.done ? chunk : terminal; yield chunk; }
+      const outcome: DecisionOutcome = { provider: route.selected.model.provider, model: route.selected.model.model, status: 'completed', finishReason: 'stop', ...(terminal?.usage ? { usage: terminal.usage } : {}) };
+      await this.saveDecision(request, route, 'completed', outcome);
+    } catch (error) {
+      await this.saveFailedDecision(request, route, error);
+      throw error;
+    }
+  }
+
+  private saveCompletedDecision(request: ResponseRequest, result: ResponseResult): Promise<void> {
+    return this.saveDecision(request, result.route, 'completed', { provider: result.provider, model: result.model, status: result.status, finishReason: result.finishReason, usage: result.usage });
+  }
+
+  private saveFailedDecision(request: ResponseRequest, route: RouteDecision, error: unknown): Promise<void> {
+    const cancelled = error instanceof RequestCancelledError;
+    const code = error instanceof RouterError ? error.code : cancelled ? 'cancelled' : 'internal_error';
+    return this.saveDecision(request, route, cancelled ? 'cancelled' : 'failed', undefined, code);
+  }
+
+  private async saveDecision(request: ResponseRequest, route: RouteDecision, state: DecisionRecord['state'], outcome?: DecisionOutcome, errorCode?: string, required = false): Promise<void> {
+    if (!this.decisions) return;
+    const now = new Date().toISOString();
+    const registryVersion = this.getRegistryVersion?.();
+    const record: DecisionRecord = { id: route.requestId, tenantId: request.policy?.tenantId ?? 'anonymous', state, route, ...(registryVersion !== undefined ? { registryVersion } : {}), ...(outcome ? { outcome } : {}), ...(errorCode ? { errorCode } : {}), createdAt: route.createdAt, updatedAt: now };
+    try { await this.decisions.save(record); }
+    catch {
+      this.metrics?.increment?.('decision_store_failure');
+      if (required) throw new RouterError('Unable to persist the routing decision', 'decision_store_error', 503, true);
+    }
   }
 
   private scheduleShadow(request: ResponseRequest, result: ResponseResult): void {

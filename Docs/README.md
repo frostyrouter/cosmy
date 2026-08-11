@@ -33,6 +33,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Model promotion gates](25-model-promotion-gates.md)
 - [Controlled canary rollouts](26-controlled-rollouts.md)
 - [Safe shadow evaluation](27-safe-shadow-evaluation.md)
+- [Routing query APIs and durable decisions](28-routing-query-apis.md)
 
 ## Decision status vocabulary
 

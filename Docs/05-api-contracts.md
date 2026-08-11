@@ -195,6 +195,8 @@ Errors declare retryability and safe retry timing. Raw provider errors are redac
 
 ## Explain endpoint
 
+Implementation note: the current endpoint is tenant-scoped, requires `routing:read`, and uses the response request ID as its decision ID. See [routing query APIs](28-routing-query-apis.md).
+
 ```http
 GET /v1/routing/decisions/{decision_id}
 ```
@@ -203,6 +205,8 @@ Authorized output includes effective constraints, rejected-candidate reason code
 
 ## Simulate endpoint
 
+Implementation note: deterministic non-provider simulation is implemented at this path. External classification is deliberately skipped so simulation cannot create provider charges.
+
 ```http
 POST /v1/routing/simulate
 ```
@@ -210,6 +214,8 @@ POST /v1/routing/simulate
 Simulation runs normalization, feature extraction, filtering, and ranking without provider execution or billable generation. Callers may specify a proposed registry or policy version. Results are clearly marked non-binding because provider health can change.
 
 ## Models endpoint
+
+Implementation note: enabled rollout-visible model discovery is implemented at this path and requires `routing:read`.
 
 ```http
 GET /v1/models

@@ -1,5 +1,5 @@
 import { NoRouteError, RequestCancelledError, RouterError } from '../domain/errors.js';
-import type { ClassificationStatus, RequestFeatures, ResponseRequest, RouteCandidate, RouteDecision, RouteMetadata } from '../domain/types.js';
+import type { ClassificationStatus, ModelConfiguration, RequestFeatures, ResponseRequest, RouteCandidate, RouteDecision, RouteMetadata } from '../domain/types.js';
 import type { ModelRegistry } from '../ports/stores.js';
 import type { RequestClassifier, RequestClassificationInput } from '../ports/classifier.js';
 import { defaultPolicy, filterEligible, rankCandidates, type Policy } from './policy.js';
@@ -81,6 +81,10 @@ export class DeterministicRouter {
   }
 
   get policyVersion(): string { return this.policy.version; }
+
+  listModels(tenantId?: string): readonly ModelConfiguration[] {
+    return this.registry.snapshot().filter((model) => model.enabled && (!this.admission || this.admission.allows(model, tenantId))).map((model) => structuredClone(model));
+  }
 
   decide(requestId: string, request: ResponseRequest): RouteDecision {
     return this.buildRoute(requestId, request, extractFeatures(request), 'deterministic');

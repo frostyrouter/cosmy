@@ -22,6 +22,7 @@ describe('managed database migrations', () => {
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS model_promotion_evidence'))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS model_rollouts'))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS shadow_campaigns'))).toBe(true);
-    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(8);
+    expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS route_decisions'))).toBe(true);
+    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(9);
   });
 });

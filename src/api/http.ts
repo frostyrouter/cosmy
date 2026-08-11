@@ -3,7 +3,7 @@ import { responseRequestJsonSchema, responseResultJsonSchema } from './json-sche
 import { NoRouteError, ProviderError, RouterError } from '../domain/errors.js';
 import type { ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
-import type { RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
+import type { ApiScope, RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
 
 function errorBody(error: unknown, requestId?: string): { error: { code: string; message: string; requestId?: string; retryable?: boolean; details?: unknown } } {
   if (error instanceof NoRouteError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable, details: { rejected: error.rejected } } };
@@ -16,11 +16,11 @@ function writeSse(reply: FastifyReply, event: string, data: unknown): void {
   reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined): RequestPrincipal | undefined {
+function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope = 'responses:create'): RequestPrincipal | undefined {
   if (!authenticator) return undefined;
   const principal = authenticator.authenticate(authorization);
   if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401);
-  if (!principal.scopes.includes('responses:create')) throw new RouterError('Credential cannot create responses', 'authorization_error', 403);
+  if (!principal.scopes.includes(scope)) throw new RouterError(`Credential lacks required scope '${scope}'`, 'authorization_error', 403);
   return principal;
 }
 
@@ -55,6 +55,44 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
   app.get('/readyz', { config: { rateLimit: false } }, async (_request, reply) => {
     if (readyCheck && !(await readyCheck())) return reply.code(503).send({ status: 'unready' });
     return { status: 'ready' };
+  });
+
+  app.get('/v1/models', async (request, reply) => {
+    try {
+      const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
+      return { object: 'list', data: service.listModels(principal?.tenantId ?? 'anonymous') };
+    } catch (error) {
+      const normalized = errorBody(error);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.post('/v1/routing/simulate', { schema: { body: responseRequestJsonSchema } }, async (request, reply) => {
+    const submitted = request.body as unknown as ResponseRequest;
+    const controller = new AbortController();
+    reply.raw.on('close', () => controller.abort());
+    try {
+      const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
+      const input = tenantRequest(submitted, principal);
+      return { nonBinding: true, decision: await service.simulate(input, controller.signal) };
+    } catch (error) {
+      const normalized = errorBody(error, submitted.requestId);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.get('/v1/routing/decisions/:decisionId', async (request, reply) => {
+    try {
+      const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
+      const decisionId = (request.params as { decisionId?: string }).decisionId;
+      if (!decisionId || !/^[A-Za-z0-9._:-]{1,128}$/u.test(decisionId)) throw new RouterError('Decision ID is invalid', 'invalid_request', 400);
+      const decision = await service.decision(principal?.tenantId ?? 'anonymous', decisionId);
+      if (!decision) throw new RouterError('Routing decision was not found', 'decision_not_found', 404, false);
+      return decision;
+    } catch (error) {
+      const normalized = errorBody(error);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
   });
 
   app.post('/v1/responses', { schema: { body: responseRequestJsonSchema, response: { 200: responseResultJsonSchema } } }, async (request: FastifyRequest, reply: FastifyReply) => {

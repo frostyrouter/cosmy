@@ -35,6 +35,11 @@ describe('tenant authentication', () => {
     expect(loadConfig({ COSMY_API_CREDENTIALS: JSON.stringify([{ id: 'metrics', tenantId: 'operations', keySha256: digest, scopes: ['metrics:read'] }]) }).apiCredentials?.[0]?.scopes).toEqual(['metrics:read']);
   });
 
+  it('parses the tenant-scoped routing read permission', () => {
+    const digest = sha256ApiKey('routing-reader');
+    expect(loadConfig({ COSMY_API_CREDENTIALS: JSON.stringify([{ id: 'routing', tenantId: 'tenant-a', keySha256: digest, scopes: ['routing:read'] }]) }).apiCredentials?.[0]?.scopes).toEqual(['routing:read']);
+  });
+
   it('rejects malformed credential configuration', () => {
     expect(() => loadConfig({ COSMY_API_CREDENTIALS: 'not-json' })).toThrow('valid JSON');
     expect(() => new StaticApiKeyAuthenticator([{ id: 'bad', tenantId: 'tenant', keySha256: 'plaintext', scopes: ['responses:create'] }])).toThrow('invalid SHA-256');

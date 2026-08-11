@@ -20,9 +20,10 @@ import type { RequestClassifier } from './ports/classifier.js';
 import type { BudgetAdministration, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
 import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
-import { PostgresControlPlaneStore, PostgresIdempotencyStore, PostgresRegistryRepository, PostgresReservationRepository } from './persistence/sql-adapters.js';
+import { PostgresControlPlaneStore, PostgresDecisionStore, PostgresIdempotencyStore, PostgresRegistryRepository, PostgresReservationRepository } from './persistence/sql-adapters.js';
 import { InMemoryResponseCache } from './persistence/memory-cache.js';
 import { InMemoryIdempotencyStore } from './persistence/memory-idempotency.js';
+import { InMemoryDecisionStore } from './persistence/memory-decisions.js';
 import { sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
 import { InMemoryControlPlaneStore } from './control-plane/memory-store.js';
 import { ControlPlaneService } from './control-plane/service.js';
@@ -39,6 +40,7 @@ export interface AppDependencies {
   cache?: import('./persistence/contracts.js').ResponseCache;
   authenticator?: RequestAuthenticator;
   idempotency?: import('./persistence/contracts.js').IdempotencyStore;
+  decisions?: import('./persistence/contracts.js').DecisionStore;
   classifier?: RequestClassifier | null;
   env?: NodeJS.ProcessEnv;
 }
@@ -144,7 +146,8 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     : undefined;
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator), readyCheck, authenticator);
+  const decisions = dependencies.decisions ?? (postgres ? new PostgresDecisionStore(postgres) : new InMemoryDecisionStore());
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator, decisions), readyCheck, authenticator);
   registerDiagnosticsRoute(app, async () => {
     const current = (registry as { currentSnapshot?: () => { version: number; source: string; createdAt: string } }).currentSnapshot?.();
     const models = registry.snapshot();

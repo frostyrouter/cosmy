@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyControlPlaneMigrations, createPostgresSqlClient, type PostgresSqlClient } from '../src/persistence/postgres.js';
-import { PostgresControlPlaneStore, PostgresReservationRepository } from '../src/persistence/sql-adapters.js';
+import { PostgresControlPlaneStore, PostgresDecisionStore, PostgresReservationRepository } from '../src/persistence/sql-adapters.js';
 import { defaultModels } from '../src/registry/default-models.js';
 import { buildApp } from '../src/app.js';
 import { sha256ApiKey } from '../src/security/auth.js';
+import { newDecisionRecord } from './support/decision-fixture.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -20,6 +21,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
   });
 
   beforeEach(async () => {
+    await db.query("DELETE FROM route_decisions WHERE tenant_id LIKE 'control-%'");
     await db.query("DELETE FROM admin_audit_events WHERE actor_credential_id = 'control-admin' OR target LIKE 'rollout:%' OR target LIKE 'shadow:%'");
     await db.query("DELETE FROM shadow_observations WHERE campaign_id IN (SELECT id FROM shadow_campaigns WHERE model_id LIKE 'control-%')");
     await db.query("DELETE FROM shadow_reservations WHERE campaign_id IN (SELECT id FROM shadow_campaigns WHERE model_id LIKE 'control-%')");
@@ -103,6 +105,14 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await expect(control.setBudget({ tenantId: 'control-tenant', limitUsd: 0.01, actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'budget_below_usage', statusCode: 409 });
     await reservations.reconcile(reservation, 0);
     await expect(control.listAudit(10)).resolves.toEqual([]);
+  });
+
+  it('persists decisions without exposing them across tenants', async () => {
+    const decisions = new PostgresDecisionStore(db);
+    const record = newDecisionRecord({ id: 'control-decision', tenantId: 'control-tenant' });
+    await decisions.save(record);
+    await expect(decisions.get('control-tenant', record.id)).resolves.toMatchObject({ id: record.id, tenantId: 'control-tenant', state: 'planned' });
+    await expect(decisions.get('control-other', record.id)).resolves.toBeUndefined();
   });
 
   it('converges a second router instance on a committed registry version', async () => {

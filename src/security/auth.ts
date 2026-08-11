@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export type ApiScope = 'responses:create' | 'admin:read' | 'admin:write' | 'metrics:read';
+export type ApiScope = 'responses:create' | 'routing:read' | 'admin:read' | 'admin:write' | 'metrics:read';
 
 export interface ApiCredential {
   id: string;

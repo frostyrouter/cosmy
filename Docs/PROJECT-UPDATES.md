@@ -2,6 +2,15 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-12 - Durable routing decisions and query APIs
+
+- Change: Added tenant-scoped planned and terminal decision records plus `GET /v1/routing/decisions/:id`, deterministic non-executing `POST /v1/routing/simulate`, and rollout-visible `GET /v1/models` APIs behind the new `routing:read` scope.
+- Privacy and reliability: Records contain route features, model metadata, versions, rejection reasons, and content-free outcomes; they exclude prompts, outputs, credentials, request metadata, and provider payloads. PostgreSQL planned writes fail before billable work, while terminal-update failures preserve the provider result and emit `decision_store_failure`.
+- Persistence: Migration 009 adds tenant-keyed PostgreSQL decision storage; development mode uses a bounded in-memory implementation.
+- Files: Domain and persistence contracts, memory/PostgreSQL stores, router service, public HTTP/auth configuration, migrations, exports, documentation, and tenant/privacy/API regressions.
+- Validation: TypeScript lint, unit/HTTP suite, migration coverage, production build, and real PostgreSQL tenant-isolation integration are required before merge.
+- Boundary: Request IDs must currently be unique per tenant; pre-route rejections, retention cleanup, pagination/export, and detailed streaming fallback histories remain follow-up work.
+
 ## 2026-08-12 - Configuration and rollout contention hardening (PR #12 follow-up)
 
 - Change: Added one validated configuration-resolution boundary so partial programmatic configuration receives the same timeout, retry, persistence, cache, authentication, and classifier defaults as environment-based startup. Explicit test configuration remains isolated from ambient provider credentials.

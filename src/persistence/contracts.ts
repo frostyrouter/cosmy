@@ -1,4 +1,4 @@
-import type { ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
+import type { DecisionRecord, ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
 import type { BudgetSnapshot, ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 import type { ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
@@ -39,6 +39,11 @@ export interface IdempotencyStore {
   claim(tenantId: string, key: string, requestHash: string, ttlSeconds: number): Promise<IdempotencyClaim>;
   complete(tenantId: string, key: string, requestHash: string, response: ResponseResult): Promise<void>;
   release(tenantId: string, key: string, requestHash: string): Promise<void>;
+}
+
+export interface DecisionStore {
+  save(record: DecisionRecord): Promise<void>;
+  get(tenantId: string, decisionId: string): Promise<DecisionRecord | undefined>;
 }
 
 export interface AuditEvent {

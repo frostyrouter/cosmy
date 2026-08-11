@@ -214,3 +214,23 @@ export interface ResponseChunk {
   done: boolean;
   usage?: Usage;
 }
+
+export interface DecisionOutcome {
+  provider: string;
+  model: string;
+  status: RouteStatus;
+  finishReason?: ResponseResult['finishReason'];
+  usage?: Usage;
+}
+
+export interface DecisionRecord {
+  id: string;
+  tenantId: string;
+  state: 'planned' | 'completed' | 'failed' | 'cancelled';
+  route: RouteDecision;
+  registryVersion?: number;
+  outcome?: DecisionOutcome;
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { ModelConfiguration, ResponseResult } from '../domain/types.js';
+import type { DecisionRecord, ModelConfiguration, ResponseResult } from '../domain/types.js';
 import type { BudgetSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
-import type { AuditEvent, ControlPlaneStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
+import type { AuditEvent, ControlPlaneStore, DecisionStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
@@ -23,6 +23,7 @@ interface AuditRow { id: string; actor_credential_id: string; actor_tenant_id: s
 interface EvidenceRow { id: string; model_id: string; model_version: string; suite_version: string; dataset_version: string; conformance_passed: boolean; pricing_verified: boolean; usage_verified: boolean; routing_pass_rate: number; quality_score: number; sample_count: number; evaluated_at: string; expires_at: string; submitted_by_credential_id: string; submitted_at: string; }
 interface RolloutRow { id: string; model_id: string; model_version: string; state: ModelRollout['state']; traffic_percentage: number; minimum_samples: number; maximum_error_rate: number; maximum_average_latency_ms: number; sample_count: string | number; error_count: string | number; total_latency_ms: number; reason: string | null; created_at: string; updated_at: string; }
 interface ShadowCampaignRow { id: string; model_id: string; model_version: string; state: ShadowCampaign['state']; sample_percentage: number; budget_limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; allowed_data_classes: ShadowCampaign['allowedDataClasses']; sample_count: string | number; success_count: string | number; error_count: string | number; created_at: string; updated_at: string; }
+interface DecisionRow { decision_id: string; tenant_id: string; state: DecisionRecord['state']; route: DecisionRecord['route']; registry_version: string | number | null; outcome: DecisionRecord['outcome'] | null; error_code: string | null; created_at: string; updated_at: string; }
 
 const rolloutContentionAttempts = 6;
 
@@ -38,6 +39,30 @@ function rolloutBackoff(attempt: number): Promise<void> {
 
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
+}
+
+function decisionRecord(row: DecisionRow): DecisionRecord {
+  return {
+    id: row.decision_id, tenantId: row.tenant_id, state: row.state, route: row.route,
+    ...(row.registry_version === null ? {} : { registryVersion: Number(row.registry_version) }),
+    ...(row.outcome ? { outcome: row.outcome } : {}), ...(row.error_code ? { errorCode: row.error_code } : {}),
+    createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+const decisionColumns = 'decision_id, tenant_id, state, route, registry_version, outcome, error_code, created_at, updated_at';
+
+export class PostgresDecisionStore implements DecisionStore {
+  constructor(private readonly db: SqlClient) {}
+
+  async save(record: DecisionRecord): Promise<void> {
+    await this.db.query(`INSERT INTO route_decisions (decision_id, tenant_id, state, route, registry_version, outcome, error_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (tenant_id, decision_id) DO UPDATE SET state = EXCLUDED.state, route = EXCLUDED.route, registry_version = EXCLUDED.registry_version, outcome = EXCLUDED.outcome, error_code = EXCLUDED.error_code, updated_at = EXCLUDED.updated_at`, [record.id, record.tenantId, record.state, JSON.stringify(record.route), record.registryVersion ?? null, record.outcome ? JSON.stringify(record.outcome) : null, record.errorCode ?? null, record.createdAt, record.updatedAt]);
+  }
+
+  async get(tenantId: string, decisionId: string): Promise<DecisionRecord | undefined> {
+    const result = await this.db.query<DecisionRow>(`SELECT ${decisionColumns} FROM route_decisions WHERE tenant_id = $1 AND decision_id = $2`, [tenantId, decisionId]);
+    return result.rows[0] ? decisionRecord(result.rows[0]) : undefined;
+  }
 }
 
 export class PostgresRegistryRepository implements RegistryRepository {
