@@ -135,4 +135,25 @@ describe('administrative HTTP API', () => {
     const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers });
     expect(audit.json().events.map((event: { action: string }) => event.action)).toEqual(expect.arrayContaining(['rollout.start', 'rollout.rollback']));
   });
+
+  it('manages a separately budgeted public/internal shadow campaign', async () => {
+    app = await buildApp(config); const headers = { authorization: `Bearer ${adminKey}` };
+    const created = await app.inject({ method: 'POST', url: '/v1/admin/shadow-campaigns', headers, payload: { modelId: defaultModels[1]!.id, modelVersion: defaultModels[1]!.version, samplePercentage: 5, budgetLimitUsd: 10, allowedDataClasses: ['public', 'internal'] } });
+    expect(created.statusCode).toBe(201); expect(created.json()).toMatchObject({ state: 'active', reservedUsd: 0, spentUsd: 0 });
+    const rejected = await app.inject({ method: 'POST', url: '/v1/admin/shadow-campaigns', headers, payload: { modelId: defaultModels[2]!.id, modelVersion: defaultModels[2]!.version, samplePercentage: 5, budgetLimitUsd: 10, allowedDataClasses: ['confidential'] } });
+    expect(rejected.statusCode).toBe(400);
+    const paused = await app.inject({ method: 'POST', url: '/v1/admin/shadow-campaign-actions', headers, payload: { id: created.json().id, action: 'pause' } }); expect(paused.json().state).toBe('paused');
+    const resumed = await app.inject({ method: 'POST', url: '/v1/admin/shadow-campaign-actions', headers, payload: { id: created.json().id, action: 'resume' } }); expect(resumed.json().state).toBe('active');
+    const completed = await app.inject({ method: 'POST', url: '/v1/admin/shadow-campaign-actions', headers, payload: { id: created.json().id, action: 'complete' } }); expect(completed.json().state).toBe('completed');
+  });
+
+  it('runs an eligible shadow asynchronously without changing the primary response', async () => {
+    app = await buildApp(config); const adminHeaders = { authorization: `Bearer ${adminKey}` };
+    const created = await app.inject({ method: 'POST', url: '/v1/admin/shadow-campaigns', headers: adminHeaders, payload: { modelId: defaultModels[1]!.id, modelVersion: defaultModels[1]!.version, samplePercentage: 100, budgetLimitUsd: 10, allowedDataClasses: ['internal'] } });
+    const primary = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { messages: [{ role: 'user', content: 'rewrite this email' }] } });
+    expect(primary.statusCode).toBe(200); expect(primary.json().route.selected.model.id).toBe(defaultModels[0]!.id);
+    let campaign = created.json(); const deadline = Date.now() + 1_000;
+    while (campaign.sampleCount === 0 && Date.now() < deadline) { await new Promise((resolve) => setTimeout(resolve, 10)); campaign = (await app.inject({ method: 'GET', url: `/v1/admin/shadow-campaigns/${created.json().id}`, headers: adminHeaders })).json(); }
+    expect(campaign).toMatchObject({ sampleCount: 1, successCount: 1, errorCount: 0, reservedUsd: 0 });
+  });
 });

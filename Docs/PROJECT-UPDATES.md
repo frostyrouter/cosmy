@@ -2,6 +2,14 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-10 - Safe shadow evaluation
+
+- Change: Added audited shadow campaigns with stable sampling, bounded asynchronous execution, lifecycle APIs, separate atomic budgets, crash-recoverable reservations, and hash-only observations.
+- Privacy: Streams, tools, tool messages, confidential/restricted data, cache hits, and idempotency replays are excluded. Provider requests strip tenant IDs, metadata, routing hints, and model overrides; durable storage contains no prompts or outputs and uses process-keyed HMAC fingerprints.
+- Isolation: Four workers and a 1,000-job bound protect memory; shadow SQL uses a dedicated four-connection pool, and every failure remains outside the primary response path.
+- Validation: Policy/coordinator/API tests, full build and unit suite, managed migration checks, concurrent PostgreSQL budget admission, lease recovery, and Docker smoke.
+- Boundary: Exact match is distribution evidence, not semantic quality. A privacy-approved signed evaluator pipeline remains required before shadow results can prove answer quality.
+
 ## 2026-08-10 - Controlled canary rollouts
 
 - Change: Added durable canary state, tenant-stable percentage assignment before ranking, explicit-model enforcement, manual promotion/rollback, and route-versioned cache keys.

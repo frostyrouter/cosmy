@@ -5,6 +5,7 @@ import type { AuditEvent, ControlPlaneStore, IdempotencyClaim, IdempotencyStore,
 import { RouterError } from '../domain/errors.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
+import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
 export interface SqlClient {
@@ -21,6 +22,7 @@ interface IdempotencyRow { request_hash: string; status: 'processing' | 'complet
 interface AuditRow { id: string; actor_credential_id: string; actor_tenant_id: string; action: AuditEvent['action']; target: string; details: Record<string, unknown>; occurred_at: string; }
 interface EvidenceRow { id: string; model_id: string; model_version: string; suite_version: string; dataset_version: string; conformance_passed: boolean; pricing_verified: boolean; usage_verified: boolean; routing_pass_rate: number; quality_score: number; sample_count: number; evaluated_at: string; expires_at: string; submitted_by_credential_id: string; submitted_at: string; }
 interface RolloutRow { id: string; model_id: string; model_version: string; state: ModelRollout['state']; traffic_percentage: number; minimum_samples: number; maximum_error_rate: number; maximum_average_latency_ms: number; sample_count: string | number; error_count: string | number; total_latency_ms: number; reason: string | null; created_at: string; updated_at: string; }
+interface ShadowCampaignRow { id: string; model_id: string; model_version: string; state: ShadowCampaign['state']; sample_percentage: number; budget_limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; allowed_data_classes: ShadowCampaign['allowedDataClasses']; sample_count: string | number; success_count: string | number; error_count: string | number; created_at: string; updated_at: string; }
 
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
@@ -158,9 +160,14 @@ function modelRollout(row: RolloutRow): ModelRollout {
 }
 
 const rolloutColumns = 'id, model_id, model_version, state, traffic_percentage, minimum_samples, maximum_error_rate, maximum_average_latency_ms, sample_count, error_count, total_latency_ms, reason, created_at, updated_at';
+const shadowCampaignColumns = 'id, model_id, model_version, state, sample_percentage, budget_limit_usd, reserved_usd, spent_usd, allowed_data_classes, sample_count, success_count, error_count, created_at, updated_at';
+
+function shadowCampaign(row: ShadowCampaignRow): ShadowCampaign {
+  return { id: row.id, modelId: row.model_id, modelVersion: row.model_version, state: row.state, samplePercentage: Number(row.sample_percentage), budgetLimitUsd: Number(row.budget_limit_usd), reservedUsd: Number(row.reserved_usd), spentUsd: Number(row.spent_usd), allowedDataClasses: row.allowed_data_classes, sampleCount: Number(row.sample_count), successCount: Number(row.success_count), errorCount: Number(row.error_count), createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString() };
+}
 
 export class PostgresControlPlaneStore implements ControlPlaneStore {
-  constructor(private readonly db: SqlClient, private readonly rolloutDb: SqlClient = db) {}
+  constructor(private readonly db: SqlClient, private readonly rolloutDb: SqlClient = db, private readonly shadowDb: SqlClient = rolloutDb) {}
 
   async publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
     if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
@@ -290,6 +297,68 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
       if (rollout.state === 'rolled_back') await this.appendAudit(tx, 'system', 'platform', 'rollout.auto_rollback', `rollout:${rollout.id}`, { reason: rollout.reason, sampleCount: rollout.sampleCount, errorRate: rollout.errorCount / rollout.sampleCount, averageLatencyMs: rollout.totalLatencyMs / rollout.sampleCount });
       return rollout;
     });
+  }
+
+  async createShadowCampaign(input: Omit<ShadowCampaign, 'id' | 'state' | 'reservedUsd' | 'spentUsd' | 'sampleCount' | 'successCount' | 'errorCount' | 'createdAt' | 'updatedAt'> & { actorCredentialId: string; actorTenantId: string }): Promise<ShadowCampaign> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:shadow-campaigns'))");
+      const active = await tx.query<{ count: string | number }>("SELECT COUNT(*) AS count FROM shadow_campaigns WHERE state = 'active'");
+      if (Number(active.rows[0]?.count ?? 0) >= 64) throw new RouterError('The active shadow campaign limit has been reached', 'shadow_campaign_limit', 409, false);
+      const id = randomUUID(); let result: SqlResult<ShadowCampaignRow>;
+      try { result = await tx.query<ShadowCampaignRow>(`INSERT INTO shadow_campaigns (id, model_id, model_version, state, sample_percentage, budget_limit_usd, allowed_data_classes) VALUES ($1, $2, $3, 'active', $4, $5, $6) RETURNING ${shadowCampaignColumns}`, [id, input.modelId, input.modelVersion, input.samplePercentage, input.budgetLimitUsd, JSON.stringify(input.allowedDataClasses)]); }
+      catch (error) { if ((error as { code?: string }).code === '23505') throw new RouterError('An active shadow campaign already exists for this model', 'shadow_campaign_conflict', 409, false); throw error; }
+      const row = result.rows[0]; if (!row) throw new Error('Shadow campaign insert returned no row');
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'shadow.start', `shadow:${id}`, { modelId: input.modelId, modelVersion: input.modelVersion, samplePercentage: input.samplePercentage, budgetLimitUsd: input.budgetLimitUsd }); return shadowCampaign(row);
+    });
+  }
+
+  async shadowCampaign(id: string): Promise<ShadowCampaign | undefined> { const result = await this.db.query<ShadowCampaignRow>(`SELECT ${shadowCampaignColumns} FROM shadow_campaigns WHERE id = $1`, [id]); return result.rows[0] ? shadowCampaign(result.rows[0]) : undefined; }
+  async activeShadowCampaigns(): Promise<readonly ShadowCampaign[]> { const result = await this.shadowDb.query<ShadowCampaignRow>(`SELECT ${shadowCampaignColumns} FROM shadow_campaigns WHERE state = 'active' ORDER BY created_at, id`); return result.rows.map(shadowCampaign); }
+
+  async changeShadowCampaign(input: { id: string; action: 'pause' | 'resume' | 'complete'; actorCredentialId: string; actorTenantId: string }): Promise<ShadowCampaign> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      const current = await tx.query<ShadowCampaignRow>(`SELECT ${shadowCampaignColumns} FROM shadow_campaigns WHERE id = $1 FOR UPDATE`, [input.id]); const row = current.rows[0];
+      if (!row) throw new RouterError('Shadow campaign was not found', 'shadow_campaign_not_found', 404, false);
+      const valid = (input.action === 'pause' && row.state === 'active') || (input.action === 'resume' && row.state === 'paused') || (input.action === 'complete' && row.state !== 'completed');
+      if (!valid) throw new RouterError('Shadow campaign action is invalid for its current state', 'shadow_campaign_state_conflict', 409, false);
+      if (input.action === 'resume') {
+        await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:shadow-campaigns'))");
+        const active = await tx.query<{ count: string | number }>("SELECT COUNT(*) AS count FROM shadow_campaigns WHERE state = 'active'");
+        if (Number(active.rows[0]?.count ?? 0) >= 64) throw new RouterError('The active shadow campaign limit has been reached', 'shadow_campaign_limit', 409, false);
+      }
+      const state = input.action === 'pause' ? 'paused' : input.action === 'resume' ? 'active' : 'completed'; let updated: SqlResult<ShadowCampaignRow>;
+      try { updated = await tx.query<ShadowCampaignRow>(`UPDATE shadow_campaigns SET state = $2, updated_at = now() WHERE id = $1 RETURNING ${shadowCampaignColumns}`, [input.id, state]); }
+      catch (error) { if ((error as { code?: string }).code === '23505') throw new RouterError('An active shadow campaign already exists for this model', 'shadow_campaign_conflict', 409, false); throw error; }
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, `shadow.${input.action}`, `shadow:${input.id}`, {}); return shadowCampaign(updated.rows[0]!);
+    });
+  }
+
+  async reserveShadow(campaignId: string, estimatedCostUsd: number): Promise<ShadowReservation> {
+    if (!Number.isFinite(estimatedCostUsd) || estimatedCostUsd < 0) throw new Error('Shadow estimate must be non-negative');
+    if (!this.shadowDb.transaction) throw new Error('Shadow reservations require transactional SQL client');
+    return this.shadowDb.transaction(async (tx) => {
+      const updated = await tx.query<ShadowCampaignRow>(`UPDATE shadow_campaigns SET reserved_usd = reserved_usd + $2, updated_at = now() WHERE id = $1 AND state = 'active' AND spent_usd + reserved_usd + $2 <= budget_limit_usd RETURNING ${shadowCampaignColumns}`, [campaignId, estimatedCostUsd]);
+      if (!updated.rows[0]) throw new RouterError('Shadow campaign is inactive or its budget would be exceeded', 'shadow_budget_exceeded', 409, false);
+      const id = randomUUID(); await tx.query("INSERT INTO shadow_reservations (id, campaign_id, estimated_cost_usd, lease_expires_at) VALUES ($1, $2, $3, now() + interval '5 minutes')", [id, campaignId, estimatedCostUsd]); return { id, campaignId, estimatedCostUsd };
+    });
+  }
+
+  async reconcileShadow(reservation: ShadowReservation, actualCostUsd: number): Promise<void> {
+    await this.shadowDb.query("WITH reconciled AS (UPDATE shadow_reservations SET actual_cost_usd = $2, reconciled_at = now(), reconciliation_source = 'runtime' WHERE id = $1 AND reconciled_at IS NULL RETURNING campaign_id, estimated_cost_usd, actual_cost_usd) UPDATE shadow_campaigns AS campaigns SET reserved_usd = GREATEST(0, campaigns.reserved_usd - reconciled.estimated_cost_usd), spent_usd = campaigns.spent_usd + reconciled.actual_cost_usd, state = CASE WHEN campaigns.spent_usd + reconciled.actual_cost_usd >= campaigns.budget_limit_usd THEN 'completed' ELSE campaigns.state END, updated_at = now() FROM reconciled WHERE campaigns.id = reconciled.campaign_id", [reservation.id, Math.max(0, actualCostUsd)]);
+  }
+
+  async recordShadowObservation(observation: ShadowObservation): Promise<void> {
+    if (!this.shadowDb.transaction) throw new Error('Shadow observations require transactional SQL client');
+    await this.shadowDb.transaction(async (tx) => {
+      await tx.query('INSERT INTO shadow_observations (id, campaign_id, primary_model_id, shadow_model_id, status, latency_ms, usage, primary_output_sha256, shadow_output_sha256, exact_match, recorded_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)', [observation.id, observation.campaignId, observation.primaryModelId, observation.shadowModelId, observation.status, observation.latencyMs, observation.usage ? JSON.stringify(observation.usage) : null, observation.primaryOutputSha256 ?? null, observation.shadowOutputSha256 ?? null, observation.exactMatch ?? null, observation.recordedAt]);
+      await tx.query("UPDATE shadow_campaigns SET sample_count = sample_count + 1, success_count = success_count + CASE WHEN $2 = 'success' THEN 1 ELSE 0 END, error_count = error_count + CASE WHEN $2 = 'error' THEN 1 ELSE 0 END, updated_at = now() WHERE id = $1", [observation.campaignId, observation.status]);
+    });
+  }
+
+  async reconcileExpiredShadows(limit = 100): Promise<number> {
+    const result = await this.shadowDb.query<{ recovered_count: string | number }>("WITH candidates AS (SELECT id FROM shadow_reservations WHERE reconciled_at IS NULL AND lease_expires_at <= now() ORDER BY lease_expires_at FOR UPDATE SKIP LOCKED LIMIT $1), reconciled AS (UPDATE shadow_reservations AS reservations SET actual_cost_usd = reservations.estimated_cost_usd, reconciled_at = now(), reconciliation_source = 'lease-expiry' FROM candidates WHERE reservations.id = candidates.id RETURNING reservations.campaign_id, reservations.estimated_cost_usd), totals AS (SELECT campaign_id, SUM(estimated_cost_usd) AS recovered_usd FROM reconciled GROUP BY campaign_id), updated AS (UPDATE shadow_campaigns SET reserved_usd = GREATEST(0, shadow_campaigns.reserved_usd - totals.recovered_usd), spent_usd = shadow_campaigns.spent_usd + totals.recovered_usd, updated_at = now() FROM totals WHERE shadow_campaigns.id = totals.campaign_id RETURNING shadow_campaigns.id) SELECT COUNT(*) AS recovered_count FROM reconciled", [limit]); return Number(result.rows[0]?.recovered_count ?? 0);
   }
 
   private async appendAudit(db: SqlClient, actorCredentialId: string, actorTenantId: string, action: AuditEvent['action'], target: string, details: Record<string, unknown>): Promise<void> {

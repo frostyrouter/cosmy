@@ -20,7 +20,10 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
   });
 
   beforeEach(async () => {
-    await db.query("DELETE FROM admin_audit_events WHERE actor_credential_id = 'control-admin' OR target LIKE 'rollout:%'");
+    await db.query("DELETE FROM admin_audit_events WHERE actor_credential_id = 'control-admin' OR target LIKE 'rollout:%' OR target LIKE 'shadow:%'");
+    await db.query("DELETE FROM shadow_observations WHERE campaign_id IN (SELECT id FROM shadow_campaigns WHERE model_id LIKE 'control-%')");
+    await db.query("DELETE FROM shadow_reservations WHERE campaign_id IN (SELECT id FROM shadow_campaigns WHERE model_id LIKE 'control-%')");
+    await db.query("DELETE FROM shadow_campaigns WHERE model_id LIKE 'control-%'");
     await db.query("DELETE FROM model_rollouts WHERE model_id LIKE 'control-%'");
     await db.query("DELETE FROM model_promotion_evidence WHERE submitted_by_credential_id = 'control-admin'");
     await db.query('DELETE FROM model_manifests');
@@ -81,6 +84,18 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await expect(control.changeRollout({ id: rollout.id, action: 'promote', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'rollout_not_ready' });
     await Promise.all(Array.from({ length: 20 }, () => control.recordRolloutOutcome({ modelId: 'control-healthy', modelVersion: '2', status: 'success', latencyMs: 100 })));
     await expect(control.changeRollout({ id: rollout.id, action: 'promote', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).resolves.toMatchObject({ state: 'active', sampleCount: 20 });
+  });
+
+  it('atomically enforces a separate shadow budget and recovers abandoned reservations', async () => {
+    const campaign = await control.createShadowCampaign({ modelId: 'control-shadow', modelVersion: '2', samplePercentage: 10, budgetLimitUsd: 1, allowedDataClasses: ['internal'], actorCredentialId: 'control-admin', actorTenantId: 'platform' });
+    const attempts = await Promise.allSettled(Array.from({ length: 10 }, () => control.reserveShadow(campaign.id, 0.2)));
+    const reservations = attempts.filter((entry): entry is PromiseFulfilledResult<Awaited<ReturnType<typeof control.reserveShadow>>> => entry.status === 'fulfilled').map((entry) => entry.value);
+    expect(reservations).toHaveLength(5);
+    await Promise.all(reservations.slice(0, 4).map((reservation) => control.reconcileShadow(reservation, 0.1)));
+    await db.query("UPDATE shadow_reservations SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [reservations[4]!.id]);
+    await expect(control.reconcileExpiredShadows()).resolves.toBe(1);
+    await control.recordShadowObservation({ id: '00000000-0000-4000-8000-000000000010', campaignId: campaign.id, primaryModelId: 'primary', shadowModelId: 'control-shadow', status: 'success', latencyMs: 20, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0.1 }, primaryOutputSha256: 'a'.repeat(64), shadowOutputSha256: 'b'.repeat(64), exactMatch: false, recordedAt: new Date().toISOString() });
+    await expect(control.shadowCampaign(campaign.id)).resolves.toMatchObject({ reservedUsd: 0, spentUsd: 0.6, sampleCount: 1, successCount: 1 });
   });
 
   it('rejects a limit below already consumed and reserved usage', async () => {

@@ -2,6 +2,7 @@ import type { ModelConfiguration, ResponseResult, Usage } from '../domain/types.
 import type { BudgetSnapshot, ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 import type { ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
+import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
 
 export interface RegistryRepository {
   getCurrent(): Promise<RegistrySnapshot | undefined>;
@@ -44,7 +45,7 @@ export interface AuditEvent {
   id: string;
   actorCredentialId: string;
   actorTenantId: string;
-  action: 'models.publish' | 'budget.set' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback';
+  action: 'models.publish' | 'budget.set' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
   target: string;
   details: Record<string, unknown>;
   occurredAt: string;
@@ -62,6 +63,14 @@ export interface ControlPlaneStore {
   runtimeRollouts(): Promise<readonly ModelRollout[]>;
   changeRollout(input: { id: string; action: 'promote' | 'rollback'; reason?: string; actorCredentialId: string; actorTenantId: string }): Promise<ModelRollout>;
   recordRolloutOutcome(outcome: RolloutOutcome): Promise<ModelRollout | undefined>;
+  createShadowCampaign(input: Omit<ShadowCampaign, 'id' | 'state' | 'reservedUsd' | 'spentUsd' | 'sampleCount' | 'successCount' | 'errorCount' | 'createdAt' | 'updatedAt'> & { actorCredentialId: string; actorTenantId: string }): Promise<ShadowCampaign>;
+  shadowCampaign(id: string): Promise<ShadowCampaign | undefined>;
+  activeShadowCampaigns(): Promise<readonly ShadowCampaign[]>;
+  changeShadowCampaign(input: { id: string; action: 'pause' | 'resume' | 'complete'; actorCredentialId: string; actorTenantId: string }): Promise<ShadowCampaign>;
+  reserveShadow(campaignId: string, estimatedCostUsd: number): Promise<ShadowReservation>;
+  reconcileShadow(reservation: ShadowReservation, actualCostUsd: number): Promise<void>;
+  recordShadowObservation(observation: ShadowObservation): Promise<void>;
+  reconcileExpiredShadows(limit?: number): Promise<number>;
 }
 
 export interface UsageRecord {

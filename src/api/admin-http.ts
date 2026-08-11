@@ -41,6 +41,12 @@ const rolloutSchema = z.object({
 }).strict();
 const rolloutIdSchema = z.string().uuid();
 const rolloutActionSchema = z.object({ id: rolloutIdSchema, action: z.enum(['promote', 'rollback']), reason: z.string().min(1).max(500).optional() }).strict();
+const shadowCampaignSchema = z.object({
+  modelId: evidenceSchema.shape.modelId, modelVersion: evidenceSchema.shape.modelVersion,
+  samplePercentage: z.number().positive().max(100), budgetLimitUsd: z.number().nonnegative().max(1_000_000),
+  allowedDataClasses: z.array(z.enum(['public', 'internal'])).min(1).max(2),
+}).strict();
+const shadowActionSchema = z.object({ id: rolloutIdSchema, action: z.enum(['pause', 'resume', 'complete']) }).strict();
 
 function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): RequestPrincipal {
   const principal = authenticator?.authenticate(authorization);
@@ -138,6 +144,29 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
       const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = rolloutActionSchema.parse(request.body);
       return await service.changeRollout(input.id, input.action, input.reason, actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/shadow-campaigns', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      return reply.code(201).send(await service.createShadowCampaign(shadowCampaignSchema.parse(request.body), actor));
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get<{ Params: { id: string } }>('/v1/admin/shadow-campaigns/:id', async (request, reply) => {
+    try {
+      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      const campaign = await service.shadowCampaign(rolloutIdSchema.parse(request.params.id));
+      if (!campaign) return reply.code(404).send({ error: { code: 'not_found', message: 'Shadow campaign was not found' } });
+      return campaign;
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/shadow-campaign-actions', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write'); const input = shadowActionSchema.parse(request.body);
+      return await service.changeShadowCampaign(input.id, input.action, actor);
     } catch (error) { return sendError(reply, error); }
   });
 }

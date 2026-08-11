@@ -32,6 +32,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Operational observability](24-operational-observability.md)
 - [Model promotion gates](25-model-promotion-gates.md)
 - [Controlled canary rollouts](26-controlled-rollouts.md)
+- [Safe shadow evaluation](27-safe-shadow-evaluation.md)
 
 ## Decision status vocabulary
 

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, type BinaryLike } from 'node:crypto';
 import type { DataClass, ModelConfiguration, ResponseRequest } from '../domain/types.js';
 import { stableBucket } from '../rollouts/rollout.js';
 
@@ -66,7 +66,7 @@ export function estimateShadowCost(model: ModelConfiguration, request: ResponseR
   return (inputTokens * model.pricing.inputPerMillionUsd + outputTokens * model.pricing.outputPerMillionUsd) / 1_000_000;
 }
 
-export function outputDigest(output: string): string { return createHash('sha256').update(output).digest('hex'); }
+export function outputDigest(output: string, key?: BinaryLike): string { return key ? createHmac('sha256', key).update(output).digest('hex') : createHash('sha256').update(output).digest('hex'); }
 
 function canonicalRequestDigest(request: ResponseRequest): string {
   return createHash('sha256').update(JSON.stringify({ messages: request.messages, temperature: request.temperature, maxOutputTokens: request.maxOutputTokens, responseFormat: request.responseFormat })).digest('hex');
