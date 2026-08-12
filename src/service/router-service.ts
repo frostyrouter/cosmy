@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DecisionOutcome, DecisionRecord, ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
 import { requestId } from '../util/ids.js';
 import { DeterministicRouter } from '../routing/router.js';
-import { RequestExecutor } from '../execution/executor.js';
+import { abortAfter, RequestExecutor } from '../execution/executor.js';
 import { RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { DecisionStore, IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
 import type { MetricsSink } from '../observability/metrics.js';
@@ -49,6 +49,7 @@ export class RouterService {
     private readonly metrics?: MetricsSink,
     private readonly shadows?: ShadowScheduler,
     private readonly decisions?: DecisionStore,
+    private readonly requestDeadlineMs?: number,
   ) {}
 
   async simulate(request: ResponseRequest, signal: AbortSignal): Promise<RouteDecision> {
@@ -70,7 +71,17 @@ export class RouterService {
 
   async complete(request: ResponseRequest, signal: AbortSignal, idempotencyKey?: string): Promise<ResponseResult> {
     validateConversation(request);
-    if (!idempotencyKey || !this.idempotency) return this.completeOnce(request, signal);
+    const deadline = this.requestDeadlineMs !== undefined ? abortAfter(signal, this.requestDeadlineMs) : undefined;
+    try {
+      return await this.completeWithIdempotency(request, deadline?.signal ?? signal, idempotencyKey, () => deadline?.signal.aborted === true && !signal.aborted);
+    } catch (error) {
+      if (deadline?.signal.aborted && !signal.aborted) throw new RouterError('Request exceeded the configured deadline', 'timeout', 504, true);
+      throw error;
+    } finally { deadline?.dispose(); }
+  }
+
+  private async completeWithIdempotency(request: ResponseRequest, signal: AbortSignal, idempotencyKey?: string, deadlineExpired?: () => boolean): Promise<ResponseResult> {
+    if (!idempotencyKey || !this.idempotency) return this.completeOnce(request, signal, deadlineExpired);
     const tenantId = request.policy?.tenantId ?? 'anonymous';
     const hash = requestHash(request);
     let claim: IdempotencyClaim;
@@ -85,7 +96,7 @@ export class RouterService {
     if (claim.status === 'in-progress') throw new RouterError('A request with this idempotency key is still running', 'idempotency_in_progress', 409, true);
     let response: ResponseResult;
     try {
-      response = await this.completeOnce(request, signal);
+      response = await this.completeOnce(request, signal, deadlineExpired);
     } catch (error) {
       try { await this.idempotency.release(tenantId, idempotencyKey, hash); } catch { /* Preserve the execution error. */ }
       throw error;
@@ -100,7 +111,7 @@ export class RouterService {
     return response;
   }
 
-  private async completeOnce(request: ResponseRequest, signal: AbortSignal): Promise<ResponseResult> {
+  private async completeOnce(request: ResponseRequest, signal: AbortSignal, deadlineExpired?: () => boolean): Promise<ResponseResult> {
     const id = request.requestId ?? requestId();
     const route = await this.router.decideAsync(id, request, signal);
     await this.saveDecision(request, route, 'planned', undefined, undefined, true);
@@ -126,21 +137,28 @@ export class RouterService {
       try { await cache.set(key, JSON.stringify(result), this.cacheTtlSeconds); } catch { this.metrics?.increment?.('cache_failure'); }
       return result;
     } catch (error) {
-      await this.saveFailedDecision(request, route, error);
-      throw error;
+      const failure = deadlineExpired?.() ? new RouterError('Request exceeded the configured deadline', 'timeout', 504, true) : error;
+      await this.saveFailedDecision(request, route, failure);
+      throw failure;
     }
   }
 
   async *stream(request: ResponseRequest, signal: AbortSignal): AsyncIterable<ResponseChunk> {
     validateConversation(request);
+    const deadline = this.requestDeadlineMs !== undefined ? abortAfter(signal, this.requestDeadlineMs) : undefined;
     const id = request.requestId ?? requestId();
-    const route = await this.router.decideAsync(id, request, signal);
-    await this.saveDecision(request, route, 'planned', undefined, undefined, true);
+    let route: RouteDecision | undefined;
     let terminal: ResponseChunk | undefined;
-    let executedRoute = route;
+    let executedRoute: RouteDecision | undefined;
     let toolCalled = false;
+    let visible = false;
     try {
-      for await (const chunk of this.executor.stream({ requestId: id, route, request, signal })) {
+      const effectiveSignal = deadline?.signal ?? signal;
+      route = await this.router.decideAsync(id, request, effectiveSignal);
+      executedRoute = route;
+      await this.saveDecision(request, route, 'planned', undefined, undefined, true);
+      for await (const chunk of this.executor.stream({ requestId: id, route, request, signal: effectiveSignal })) {
+        if (!visible) { visible = true; deadline?.dispose(); }
         if (chunk.route) executedRoute = chunk.route;
         if (chunk.type?.startsWith('tool-call')) toolCalled = true;
         terminal = chunk.done ? chunk : terminal;
@@ -149,9 +167,12 @@ export class RouterService {
       const outcome: DecisionOutcome = { provider: executedRoute.selected.model.provider, model: executedRoute.selected.model.model, status: 'completed', finishReason: toolCalled ? 'tool_calls' : 'stop', ...(terminal?.usage ? { usage: terminal.usage } : {}) };
       await this.saveDecision(request, executedRoute, 'completed', outcome);
     } catch (error) {
-      await this.saveFailedDecision(request, executedRoute, error);
-      throw error;
-    }
+      const failure = !visible && deadline?.signal.aborted && !signal.aborted
+        ? new RouterError('Request exceeded the configured deadline before first output', 'timeout', 504, true)
+        : error;
+      if (executedRoute) await this.saveFailedDecision(request, executedRoute, failure);
+      throw failure;
+    } finally { deadline?.dispose(); }
   }
 
   private saveCompletedDecision(request: ResponseRequest, result: ResponseResult): Promise<void> {

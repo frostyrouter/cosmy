@@ -28,6 +28,8 @@ At startup, configured manifests are merged with the simulator manifest. The pro
 
 Before provider execution, `RouterService` awaits semantic classification and the reasoning gate. Streaming does not emit headers or provider deltas until route construction completes.
 
+`REQUEST_TIMEOUT_MS` bounds this routing work as well as provider execution. For streams it is a time-to-first-canonical-event deadline and is released after visible output begins. See [end-to-end deadlines](32-end-to-end-deadlines.md).
+
 Each complete or stream attempt has:
 
 1. A request-local timeout.

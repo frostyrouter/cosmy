@@ -148,7 +148,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
   const decisions = dependencies.decisions ?? (postgres ? new PostgresDecisionStore(postgres) : new InMemoryDecisionStore());
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator, decisions), readyCheck, authenticator);
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator, decisions, config.requestTimeoutMs), readyCheck, authenticator);
   registerDiagnosticsRoute(app, async () => {
     const current = (registry as { currentSnapshot?: () => { version: number; source: string; createdAt: string } }).currentSnapshot?.();
     const models = registry.snapshot();

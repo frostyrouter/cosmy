@@ -2,6 +2,15 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-12 - End-to-end routing and first-event deadlines (commit pending)
+
+- Change: Moved the overall request deadline to service admission so it includes semantic classification, routing, planned-decision persistence, provider fallback/retries, and completion or streaming time to first canonical event.
+- Semantics: Non-streaming and pre-output streaming deadline expiry return retryable HTTP 504 `timeout`; caller cancellation stays distinct. Streaming releases the timer after its first visible text/tool event so long valid streams are not truncated.
+- Audit: A timed-out request with a planned route now persists terminal `errorCode: timeout` instead of being misclassified as a client cancellation. Pre-route classifier timeouts have no decision record because no route exists.
+- Files: Service deadline composition, application wiring, classifier/HTTP/audit regressions, and runtime documentation.
+- Validation: 168 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Store operations without cancellation rely on their own bounded query timeouts; the overall timer cannot forcibly interrupt an arbitrary non-cooperative promise.
+
 ## 2026-08-12 - Stateless tool-result continuation (commit pending)
 
 - Change: Extended canonical messages with assistant tool-call history and matched tool-result messages, then translated full stateless continuation histories for OpenAI, Anthropic, and Gemini while preserving call IDs and explicit tool errors.

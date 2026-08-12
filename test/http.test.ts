@@ -288,8 +288,30 @@ describe('HTTP API', () => {
       complete: async (input) => { await delay(300); if (input.signal.aborted) throw new Error('aborted'); return { output: 'late', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }; },
       stream: async function* () {},
     };
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 100, providerMaxRetries: 0 }, { providers: [slow], registry: new (await import('../src/registry/memory-registry.js')).InMemoryModelRegistry([model]) });
+    const records: import('../src/domain/types.js').DecisionRecord[] = [];
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 100, providerMaxRetries: 0 }, { providers: [slow], registry: new (await import('../src/registry/memory-registry.js')).InMemoryModelRegistry([model]), decisions: { save: async (record) => { records.push(structuredClone(record)); }, get: async () => undefined } });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { model: 'slow', messages: [{ role: 'user', content: 'hello' }] } });
+    expect(response.statusCode).toBe(504);
+    expect(response.json().error.code).toBe('timeout');
+    expect(records.at(-1)).toMatchObject({ state: 'failed', errorCode: 'timeout' });
+  });
+
+  it('includes classifier time in the overall request deadline', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 30, classifierTimeoutMs: 5_000, classifierMode: 'fail', providerMaxRetries: 0 }, {
+      classifier: { name: 'slow', classify: async () => new Promise(() => {}) },
+    });
+    const started = Date.now();
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'classify this' }] } });
+    expect(response.statusCode).toBe(504);
+    expect(response.json().error).toMatchObject({ code: 'timeout', retryable: true });
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('applies the same deadline through routing to streaming time-to-first-event', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 30, classifierTimeoutMs: 5_000, classifierMode: 'fail', providerMaxRetries: 0 }, {
+      classifier: { name: 'slow', classify: async () => new Promise(() => {}) },
+    });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'classify stream' }] } });
     expect(response.statusCode).toBe(504);
     expect(response.json().error.code).toBe('timeout');
   });
