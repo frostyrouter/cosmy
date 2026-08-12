@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import type { DecisionOutcome, DecisionRecord, ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
+import type { DecisionAttempt, DecisionOutcome, DecisionRecord, ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
 import { requestId } from '../util/ids.js';
 import { DeterministicRouter } from '../routing/router.js';
 import { abortAfter, RequestExecutor } from '../execution/executor.js';
-import { RequestCancelledError, RouterError } from '../domain/errors.js';
+import { NoRouteError, RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { DecisionStore, IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
 import type { MetricsSink } from '../observability/metrics.js';
 import type { ShadowScheduler } from '../shadow/coordinator.js';
@@ -70,7 +70,9 @@ export class RouterService {
   }
 
   async complete(request: ResponseRequest, signal: AbortSignal, idempotencyKey?: string): Promise<ResponseResult> {
-    validateConversation(request);
+    request = request.requestId ? request : { ...request, requestId: requestId() };
+    try { validateConversation(request); }
+    catch (error) { await this.saveRejectedDecision(request, request.requestId!, error, true); throw error; }
     const deadline = this.requestDeadlineMs !== undefined ? abortAfter(signal, this.requestDeadlineMs) : undefined;
     try {
       return await this.completeWithIdempotency(request, deadline?.signal ?? signal, idempotencyKey, () => deadline?.signal.aborted === true && !signal.aborted);
@@ -113,13 +115,20 @@ export class RouterService {
 
   private async completeOnce(request: ResponseRequest, signal: AbortSignal, deadlineExpired?: () => boolean): Promise<ResponseResult> {
     const id = request.requestId ?? requestId();
-    const route = await this.router.decideAsync(id, request, signal);
+    const attempts: DecisionAttempt[] = [];
+    let route: RouteDecision;
+    try { route = await this.router.decideAsync(id, request, signal); }
+    catch (error) {
+      const failure = deadlineExpired?.() ? new RouterError('Request exceeded the configured deadline', 'timeout', 504, true) : error;
+      await this.saveRejectedDecision(request, id, failure, true);
+      throw failure;
+    }
     await this.saveDecision(request, route, 'planned', undefined, undefined, true);
     const cache = this.cache;
     try {
       if (!cache || this.cacheTtlSeconds <= 0 || !cacheEligible(request)) {
-        const result = await this.executor.execute({ requestId: id, route, request, signal });
-        await this.saveCompletedDecision(request, result); this.scheduleShadow(request, result); return result;
+        const result = await this.executor.execute({ requestId: id, route, request, signal, onAttempt: (attempt) => attempts.push(attempt) });
+        await this.saveCompletedDecision(request, result, attempts); this.scheduleShadow(request, result); return result;
       }
       const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.(), route.selected.model.id, route.selected.model.version);
       try {
@@ -128,23 +137,25 @@ export class RouterService {
           this.metrics?.increment?.('cache_hit');
           const stored = JSON.parse(cached.value) as ResponseResult;
           const result = { ...stored, requestId: id, route: { ...stored.route, requestId: id } };
-          await this.saveCompletedDecision(request, result);
+          await this.saveCompletedDecision(request, result, attempts);
           return result;
         }
       } catch { this.metrics?.increment?.('cache_failure'); }
-      const result = await this.executor.execute({ requestId: id, route, request, signal });
-      await this.saveCompletedDecision(request, result); this.scheduleShadow(request, result);
+      const result = await this.executor.execute({ requestId: id, route, request, signal, onAttempt: (attempt) => attempts.push(attempt) });
+      await this.saveCompletedDecision(request, result, attempts); this.scheduleShadow(request, result);
       try { await cache.set(key, JSON.stringify(result), this.cacheTtlSeconds); } catch { this.metrics?.increment?.('cache_failure'); }
       return result;
     } catch (error) {
       const failure = deadlineExpired?.() ? new RouterError('Request exceeded the configured deadline', 'timeout', 504, true) : error;
-      await this.saveFailedDecision(request, route, failure);
+      await this.saveFailedDecision(request, route, failure, attempts);
       throw failure;
     }
   }
 
   async *stream(request: ResponseRequest, signal: AbortSignal): AsyncIterable<ResponseChunk> {
-    validateConversation(request);
+    request = request.requestId ? request : { ...request, requestId: requestId() };
+    try { validateConversation(request); }
+    catch (error) { await this.saveRejectedDecision(request, request.requestId!, error, true); throw error; }
     const deadline = this.requestDeadlineMs !== undefined ? abortAfter(signal, this.requestDeadlineMs) : undefined;
     const id = request.requestId ?? requestId();
     let route: RouteDecision | undefined;
@@ -152,12 +163,18 @@ export class RouterService {
     let executedRoute: RouteDecision | undefined;
     let toolCalled = false;
     let visible = false;
+    const attempts: DecisionAttempt[] = [];
     try {
       const effectiveSignal = deadline?.signal ?? signal;
-      route = await this.router.decideAsync(id, request, effectiveSignal);
+      try { route = await this.router.decideAsync(id, request, effectiveSignal); }
+      catch (error) {
+        const failure = deadline?.signal.aborted && !signal.aborted ? new RouterError('Request exceeded the configured deadline before routing completed', 'timeout', 504, true) : error;
+        await this.saveRejectedDecision(request, id, failure, true);
+        throw failure;
+      }
       executedRoute = route;
       await this.saveDecision(request, route, 'planned', undefined, undefined, true);
-      for await (const chunk of this.executor.stream({ requestId: id, route, request, signal: effectiveSignal })) {
+      for await (const chunk of this.executor.stream({ requestId: id, route, request, signal: effectiveSignal, onAttempt: (attempt) => attempts.push(attempt) })) {
         if (!visible) { visible = true; deadline?.dispose(); }
         if (chunk.route) executedRoute = chunk.route;
         if (chunk.type?.startsWith('tool-call')) toolCalled = true;
@@ -165,35 +182,52 @@ export class RouterService {
         yield chunk;
       }
       const outcome: DecisionOutcome = { provider: executedRoute.selected.model.provider, model: executedRoute.selected.model.model, status: 'completed', finishReason: toolCalled ? 'tool_calls' : 'stop', ...(terminal?.usage ? { usage: terminal.usage } : {}) };
-      await this.saveDecision(request, executedRoute, 'completed', outcome);
+      await this.saveDecision(request, executedRoute, 'completed', outcome, undefined, false, attempts);
     } catch (error) {
       const failure = !visible && deadline?.signal.aborted && !signal.aborted
         ? new RouterError('Request exceeded the configured deadline before first output', 'timeout', 504, true)
         : error;
-      if (executedRoute) await this.saveFailedDecision(request, executedRoute, failure);
+      if (executedRoute) await this.saveFailedDecision(request, executedRoute, failure, attempts);
       throw failure;
     } finally { deadline?.dispose(); }
   }
 
-  private saveCompletedDecision(request: ResponseRequest, result: ResponseResult): Promise<void> {
-    return this.saveDecision(request, result.route, 'completed', { provider: result.provider, model: result.model, status: result.status, finishReason: result.finishReason, usage: result.usage });
+  private saveCompletedDecision(request: ResponseRequest, result: ResponseResult, attempts: DecisionAttempt[]): Promise<void> {
+    return this.saveDecision(request, result.route, 'completed', { provider: result.provider, model: result.model, status: result.status, finishReason: result.finishReason, usage: result.usage }, undefined, false, attempts);
   }
 
-  private saveFailedDecision(request: ResponseRequest, route: RouteDecision, error: unknown): Promise<void> {
+  private saveFailedDecision(request: ResponseRequest, route: RouteDecision, error: unknown, attempts: DecisionAttempt[]): Promise<void> {
     const cancelled = error instanceof RequestCancelledError;
     const code = error instanceof RouterError ? error.code : cancelled ? 'cancelled' : 'internal_error';
-    return this.saveDecision(request, route, cancelled ? 'cancelled' : 'failed', undefined, code);
+    return this.saveDecision(request, route, cancelled ? 'cancelled' : 'failed', undefined, code, false, attempts);
   }
 
-  private async saveDecision(request: ResponseRequest, route: RouteDecision, state: DecisionRecord['state'], outcome?: DecisionOutcome, errorCode?: string, required = false): Promise<void> {
+  private async saveDecision(request: ResponseRequest, route: RouteDecision, state: DecisionRecord['state'], outcome?: DecisionOutcome, errorCode?: string, required = false, attempts: DecisionAttempt[] = []): Promise<void> {
     if (!this.decisions) return;
     const now = new Date().toISOString();
     const registryVersion = this.getRegistryVersion?.();
-    const record: DecisionRecord = { id: route.requestId, tenantId: request.policy?.tenantId ?? 'anonymous', state, route, ...(registryVersion !== undefined ? { registryVersion } : {}), ...(outcome ? { outcome } : {}), ...(errorCode ? { errorCode } : {}), createdAt: route.createdAt, updatedAt: now };
+    const record: DecisionRecord = { id: route.requestId, tenantId: request.policy?.tenantId ?? 'anonymous', state, route, attempts: structuredClone(attempts), ...(registryVersion !== undefined ? { registryVersion } : {}), ...(outcome ? { outcome } : {}), ...(errorCode ? { errorCode } : {}), createdAt: route.createdAt, updatedAt: now };
     try { await this.decisions.save(record); }
     catch {
       this.metrics?.increment?.('decision_store_failure');
       if (required) throw new RouterError('Unable to persist the routing decision', 'decision_store_error', 503, true);
+    }
+  }
+
+  private async saveRejectedDecision(request: ResponseRequest, id: string, error: unknown, required = false): Promise<void> {
+    if (!this.decisions) return;
+    const now = new Date().toISOString();
+    const normalized = error instanceof RouterError ? error : new RouterError('Routing failed unexpectedly', 'internal_error', 500, false);
+    const registryVersion = this.getRegistryVersion?.();
+    const record: DecisionRecord = {
+      id, tenantId: request.policy?.tenantId ?? 'anonymous', state: 'rejected', attempts: [],
+      rejection: { code: normalized.code, statusCode: normalized.statusCode, retryable: normalized.retryable, ...(normalized instanceof NoRouteError && normalized.rejected.length ? { candidates: normalized.rejected as import('../domain/types.js').Rejection[] } : {}) },
+      errorCode: normalized.code, ...(registryVersion !== undefined ? { registryVersion } : {}), createdAt: now, updatedAt: now,
+    };
+    try { await this.decisions.save(record); }
+    catch {
+      this.metrics?.increment?.('decision_store_failure');
+      if (required) throw new RouterError('Unable to persist the rejected routing decision', 'decision_store_error', 503, true);
     }
   }
 

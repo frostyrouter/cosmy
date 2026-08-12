@@ -239,13 +239,35 @@ export interface DecisionOutcome {
   usage?: Usage;
 }
 
+export interface DecisionAttempt {
+  index: number;
+  modelId: string;
+  model: string;
+  provider: string;
+  status: 'completed' | 'failed' | 'cancelled';
+  latencyMs: number;
+  startedAt: string;
+  completedAt: string;
+  errorCode?: string;
+  usage?: Usage;
+}
+
+export interface DecisionRejection {
+  code: string;
+  statusCode: number;
+  retryable: boolean;
+  candidates?: Rejection[];
+}
+
 export interface DecisionRecord {
   id: string;
   tenantId: string;
-  state: 'planned' | 'completed' | 'failed' | 'cancelled';
-  route: RouteDecision;
+  state: 'planned' | 'completed' | 'failed' | 'cancelled' | 'rejected';
+  route?: RouteDecision;
   registryVersion?: number;
   outcome?: DecisionOutcome;
+  rejection?: DecisionRejection;
+  attempts: DecisionAttempt[];
   errorCode?: string;
   createdAt: string;
   updatedAt: string;

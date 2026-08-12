@@ -205,7 +205,9 @@ Implementation note: the current endpoint is tenant-scoped, requires `routing:re
 GET /v1/routing/decisions/{decision_id}
 ```
 
-Authorized output includes effective constraints, rejected-candidate reason codes, normalized candidate metrics, selection reason, attempts, fallback behavior, and version references. It excludes provider credentials, private prompts beyond retention policy, and hidden chain-of-thought.
+Authorized output includes effective constraints, rejected-candidate reason codes, normalized candidate metrics, selection reason, attempts, fallback behavior, and version references. It excludes prompts, outputs, provider credentials, raw provider errors, provider request IDs, and hidden chain-of-thought.
+
+Implementation note: route-less semantic/routing rejections and ordered candidate-level fallback attempts are persisted. Attempts contain normalized status, latency, error code, and usage—not prompt/output content or raw provider errors. See [complete decision evidence](34-complete-decision-evidence.md).
 
 ## Simulate endpoint
 

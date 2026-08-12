@@ -34,6 +34,12 @@ The documentation deliberately separates product intent from implementation deta
 - [Controlled canary rollouts](26-controlled-rollouts.md)
 - [Safe shadow evaluation](27-safe-shadow-evaluation.md)
 - [Routing query APIs and durable decisions](28-routing-query-apis.md)
+- [Live health and output validation](29-live-health-and-output-validation.md)
+- [Normalized tools and streaming events](30-normalized-tools-and-events.md)
+- [Tool-result continuations](31-tool-result-continuations.md)
+- [End-to-end deadlines](32-end-to-end-deadlines.md)
+- [Shared provider health](33-shared-provider-health.md)
+- [Complete decision evidence](34-complete-decision-evidence.md)
 
 ## Decision status vocabulary
 

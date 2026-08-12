@@ -42,6 +42,22 @@ describe('fallback execution and metrics', () => {
     expect(chunks).toEqual(['partial']);
   });
 
+  it('falls back when a provider stream ends before any terminal event', async () => {
+    const first = { ...defaultModels[0]!, id: 'first', provider: 'first' };
+    const second = { ...defaultModels[1]!, id: 'second', provider: 'second' };
+    const route = new DeterministicRouter(new InMemoryModelRegistry([first, second])).decide('req_missing_terminal', { stream: true, messages: [{ role: 'user', content: 'hello' }] });
+    const providers: ProviderAdapter[] = [
+      { name: 'first', listModels: () => [first], complete: async () => { throw new Error('unused'); }, stream: async function* () {} },
+      { name: 'second', listModels: () => [second], complete: async () => { throw new Error('unused'); }, stream: async function* () { yield { requestId: 'req_missing_terminal', index: 0, delta: 'fallback', done: false }; yield { requestId: 'req_missing_terminal', index: 1, delta: '', done: true }; } },
+    ];
+    const attempts: import('../src/domain/types.js').DecisionAttempt[] = [];
+    const executor = new RequestExecutor(providers, new InMemoryUsageLedger(), new InMemoryHealthStore());
+    const chunks = [];
+    for await (const chunk of executor.stream({ requestId: 'req_missing_terminal', route, request: { stream: true, messages: [{ role: 'user', content: 'hello' }] }, signal: new AbortController().signal, onAttempt: (attempt) => attempts.push(attempt) })) chunks.push(chunk.delta);
+    expect(chunks).toEqual(['fallback', '']);
+    expect(attempts).toMatchObject([{ provider: 'first', status: 'failed', errorCode: 'provider_error' }, { provider: 'second', status: 'completed' }]);
+  });
+
   it('falls back to the next candidate while the primary provider circuit is open', async () => {
     const first = { ...defaultModels[0]!, id: 'first', provider: 'first' };
     const second = { ...defaultModels[1]!, id: 'second', provider: 'second' };

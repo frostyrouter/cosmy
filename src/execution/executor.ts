@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import type { ProviderAdapter } from '../ports/provider.js';
 import type { HealthStore, UsageLedger, UsageReservation } from '../ports/stores.js';
-import type { ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
+import type { DecisionAttempt, ModelConfiguration, ResponseChunk, ResponseRequest, ResponseResult, RouteDecision } from '../domain/types.js';
 import { InvalidRequestError, OutputValidationError, ProviderError, RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { MetricsSink } from '../observability/metrics.js';
 import type { RolloutOutcomeRecorder } from '../rollouts/rollout.js';
@@ -12,6 +12,7 @@ export interface ExecutionOptions {
   route: RouteDecision;
   request: ResponseRequest;
   signal: AbortSignal;
+  onAttempt?: (attempt: DecisionAttempt) => void;
 }
 
 export class RequestExecutor {
@@ -36,7 +37,7 @@ export class RequestExecutor {
   }
 
   async execute(options: ExecutionOptions): Promise<ResponseResult> {
-    const { request, route, requestId, signal } = options;
+    const { request, route, requestId, signal, onAttempt } = options;
     const responseSchema = request.responseFormat?.type === 'json-schema' ? request.responseFormat.schema ?? { type: 'object' } : undefined;
     if (responseSchema) {
       const unsupported = unsupportedSchemaKeywords(responseSchema);
@@ -46,7 +47,7 @@ export class RequestExecutor {
     const effective = deadline?.signal ?? signal;
     try {
       if (effective.aborted) throw new RequestCancelledError();
-      if (route.alternatives.length === 0) return await this.executeCandidate({ requestId, route, request, signal: effective, fallbackIndex: 0 });
+      if (route.alternatives.length === 0) return await this.executeCandidate({ requestId, route, request, signal: effective, fallbackIndex: 0, ...(onAttempt ? { onAttempt } : {}) });
       const candidates = [route.selected, ...route.alternatives];
       let lastError: unknown;
       let validationCostUsd = 0;
@@ -56,7 +57,7 @@ export class RequestExecutor {
         }
         const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
         try {
-          return await this.executeCandidate({ requestId, route: attemptRoute, request, signal: effective, fallbackIndex });
+          return await this.executeCandidate({ requestId, route: attemptRoute, request, signal: effective, fallbackIndex, ...(onAttempt ? { onAttempt } : {}) });
         } catch (error) {
           lastError = error;
           if (error instanceof OutputValidationError) validationCostUsd += error.actualCostUsd;
@@ -78,14 +79,14 @@ export class RequestExecutor {
   async *stream(options: ExecutionOptions): AsyncIterable<ResponseChunk> {
     this.metrics?.streamOpened?.();
     try {
-      const { request, route, requestId, signal } = options;
+      const { request, route, requestId, signal, onAttempt } = options;
       if (request.responseFormat?.type === 'json-schema') {
         const unsupported = unsupportedSchemaKeywords(request.responseFormat.schema ?? { type: 'object' });
         if (unsupported.length) throw new InvalidRequestError(`Unsupported response schema: ${unsupported[0]}`);
       }
       if (signal.aborted) throw new RequestCancelledError();
       if (route.alternatives.length === 0) {
-        for await (const chunk of this.streamCandidate({ requestId, route, request, signal, fallbackIndex: 0 })) yield chunk;
+        for await (const chunk of this.streamCandidate({ requestId, route, request, signal, fallbackIndex: 0, ...(onAttempt ? { onAttempt } : {}) })) yield chunk;
         return;
       }
       const candidates = [route.selected, ...route.alternatives];
@@ -93,7 +94,7 @@ export class RequestExecutor {
         const attemptRoute = { ...route, selected: candidate, alternatives: candidates.slice(fallbackIndex + 1) };
         let emitted = false;
         try {
-          for await (const chunk of this.streamCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex })) {
+          for await (const chunk of this.streamCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex, ...(onAttempt ? { onAttempt } : {}) })) {
             emitted = emitted || !chunk.done;
             yield chunk;
           }
@@ -124,6 +125,7 @@ export class RequestExecutor {
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
+    const startedAt = new Date().toISOString();
     try {
       const response = await provider.complete({ request: { ...request, requestId }, model: route.selected.model, signal });
       const latencyMs = performance.now() - started;
@@ -134,11 +136,13 @@ export class RequestExecutor {
         if (issues.length) {
           this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'error', latencyMs, usage: response.usage, fallbackIndex });
           await this.recordRolloutOutcome(route.selected.model, 'error', latencyMs);
+          notifyAttempt(options, startedAt, latencyMs, 'failed', response.usage, 'output_validation_failed');
           throw new OutputValidationError('Provider output did not satisfy the requested JSON schema', response.usage.estimatedCostUsd, issues);
         }
       }
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: response.usage, fallbackIndex });
       await this.recordRolloutOutcome(route.selected.model, 'success', latencyMs);
+      notifyAttempt(options, startedAt, latencyMs, 'completed', response.usage);
       return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, ...(response.toolCalls?.length ? { toolCalls: response.toolCalls } : {}), usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
       if (error instanceof OutputValidationError) throw error;
@@ -147,6 +151,7 @@ export class RequestExecutor {
       await this.reconcileBestEffort(reservation, 0);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs, fallbackIndex });
       await this.recordRolloutOutcome(route.selected.model, error instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs);
+      notifyAttempt(options, startedAt, latencyMs, error instanceof RequestCancelledError ? 'cancelled' : 'failed', undefined, attemptErrorCode(error));
       throw error;
     }
   }
@@ -157,6 +162,7 @@ export class RequestExecutor {
     const tenantId = request.policy?.tenantId ?? 'default';
     const reservation = await this.usage.reserve({ tenantId, estimatedCostUsd: route.selected.estimatedCostUsd });
     const started = performance.now();
+    const startedAt = new Date().toISOString();
     let actualCostUsd = 0;
     let completed = false;
     let routeAnnounced = false;
@@ -197,14 +203,19 @@ export class RequestExecutor {
             this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, fallbackIndex });
           }
           await this.recordRolloutOutcome(route.selected.model, 'success', latencyMs);
+          notifyAttempt(options, startedAt, latencyMs, 'completed', chunk.usage);
+          break;
         }
       }
       if (heartbeatError) throw heartbeatError;
+      if (!completed) throw new ProviderError('Provider stream ended without a terminal event', true);
     } catch (error) {
       const executionError = heartbeatError ?? error;
       if (!heartbeatError && !(error instanceof RequestCancelledError)) this.health.markFailure(route.selected.model.id);
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: executionError instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs: performance.now() - started, fallbackIndex });
-      await this.recordRolloutOutcome(route.selected.model, executionError instanceof RequestCancelledError ? 'cancelled' : 'error', performance.now() - started);
+      const latencyMs = performance.now() - started;
+      await this.recordRolloutOutcome(route.selected.model, executionError instanceof RequestCancelledError ? 'cancelled' : 'error', latencyMs);
+      notifyAttempt(options, startedAt, latencyMs, executionError instanceof RequestCancelledError ? 'cancelled' : 'failed', undefined, attemptErrorCode(executionError));
       throw executionError;
     } finally {
       closed = true;
@@ -231,6 +242,28 @@ export class RequestExecutor {
     if (!this.rolloutOutcomes) return;
     try { await settleWithin(this.rolloutOutcomes.recordOutcome({ modelId: model.id, modelVersion: model.version, status, latencyMs }), 100); } catch { this.metrics?.increment?.('rollout_observation_failure'); }
   }
+}
+
+function attemptErrorCode(error: unknown): string {
+  if (error instanceof RouterError) return error.code;
+  return 'internal_error';
+}
+
+function notifyAttempt(options: ExecutionOptions & { fallbackIndex: number }, startedAt: string, latencyMs: number, status: DecisionAttempt['status'], usage?: DecisionAttempt['usage'], errorCode?: string): void {
+  const completedAt = new Date().toISOString();
+  const attempt: DecisionAttempt = {
+    index: options.fallbackIndex,
+    modelId: options.route.selected.model.id,
+    model: options.route.selected.model.model,
+    provider: options.route.selected.model.provider,
+    status,
+    latencyMs,
+    startedAt,
+    completedAt,
+    ...(errorCode ? { errorCode } : {}),
+    ...(usage ? { usage } : {}),
+  };
+  try { options.onAttempt?.(attempt); } catch { /* Audit observation must not alter execution. */ }
 }
 
 async function settleWithin<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {

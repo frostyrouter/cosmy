@@ -25,11 +25,61 @@ describe('routing query APIs', () => {
     expect(created.statusCode).toBe(200);
     const found = await app.inject({ method: 'GET', url: '/v1/routing/decisions/decision-42', headers: { authorization: 'Bearer tenant-a-key' } });
     expect(found.statusCode).toBe(200);
-    expect(found.json()).toMatchObject({ id: 'decision-42', tenantId: 'tenant-a', state: 'completed', outcome: { provider: 'simulator', status: 'completed' } });
+    expect(found.json()).toMatchObject({ id: 'decision-42', tenantId: 'tenant-a', state: 'completed', outcome: { provider: 'simulator', status: 'completed' }, attempts: [{ index: 0, provider: 'simulator', status: 'completed' }] });
     expect(found.body).not.toContain(prompt);
     expect(found.body).not.toContain('Simulated response');
     const isolated = await app.inject({ method: 'GET', url: '/v1/routing/decisions/decision-42', headers: { authorization: 'Bearer tenant-b-key' } });
     expect(isolated.statusCode).toBe(404);
+  });
+
+  it('persists route-less rejections and returns the generated decision ID', async () => {
+    app = await buildApp({ ...base, apiCredentials: [{ id: 'tenant-a', tenantId: 'tenant-a', keySha256: sha256ApiKey('tenant-a-key'), scopes: ['responses:create', 'routing:read'] }] });
+    const rejected = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer tenant-a-key' }, payload: { model: 'missing-model', messages: [{ role: 'user', content: 'private rejected prompt' }] } });
+    expect(rejected.statusCode).toBe(422);
+    const decisionId = rejected.json().error.requestId as string;
+    expect(decisionId).toMatch(/^req_/u);
+    const found = await app.inject({ method: 'GET', url: `/v1/routing/decisions/${decisionId}`, headers: { authorization: 'Bearer tenant-a-key' } });
+    expect(found.statusCode).toBe(200);
+    expect(found.json()).toMatchObject({ id: decisionId, tenantId: 'tenant-a', state: 'rejected', attempts: [], errorCode: 'no_eligible_model', rejection: { code: 'no_eligible_model', statusCode: 422, retryable: false } });
+    expect(found.json().route).toBeUndefined();
+    expect(found.body).not.toContain('private rejected prompt');
+  });
+
+  it('persists semantic conversation rejection before classification or provider work', async () => {
+    let providerCalls = 0;
+    const provider: ProviderAdapter = { name: 'simulator', listModels: () => defaultModels, complete: async () => { providerCalls += 1; throw new Error('must not run'); }, stream: async function* () { providerCalls += 1; } };
+    app = await buildApp({ ...base, apiCredentials: [{ id: 'tenant-a', tenantId: 'tenant-a', keySha256: sha256ApiKey('tenant-a-key'), scopes: ['responses:create', 'routing:read'] }] }, { providers: [provider] });
+    const headers = { authorization: 'Bearer tenant-a-key' };
+    const rejected = await app.inject({ method: 'POST', url: '/v1/responses', headers, payload: {
+      requestId: 'semantic-rejection', messages: [{ role: 'assistant', content: '', toolCalls: [{ id: 'call-1', name: 'weather', arguments: {} }] }], tools: [{ name: 'weather', inputSchema: { type: 'object' } }],
+    } });
+    expect(rejected.statusCode).toBe(400);
+    const found = await app.inject({ method: 'GET', url: '/v1/routing/decisions/semantic-rejection', headers });
+    expect(found.json()).toMatchObject({ state: 'rejected', attempts: [], rejection: { code: 'invalid_request', statusCode: 400 } });
+    expect(found.json().route).toBeUndefined();
+    expect(providerCalls).toBe(0);
+  });
+
+  it('records each failed and successful fallback candidate without content', async () => {
+    const first = { ...defaultModels[0]!, id: 'attempt-first', provider: 'first' };
+    const second = { ...defaultModels[1]!, id: 'attempt-second', provider: 'second' };
+    const records: DecisionRecord[] = [];
+    const decisions: DecisionStore = { save: async (record) => { records.push(structuredClone(record)); }, get: async () => undefined };
+    const providers: ProviderAdapter[] = [
+      { name: 'first', listModels: () => [first], complete: async () => { throw new ProviderError('secret upstream details', true); }, stream: async function* () {} },
+      { name: 'second', listModels: () => [second], complete: async () => ({ output: 'private output', usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5, estimatedCostUsd: 0.001 }, finishReason: 'stop' }), stream: async function* () {} },
+    ];
+    app = await buildApp(base, { registry: new InMemoryModelRegistry([first, second]), providers, decisions });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { requestId: 'attempt-history', messages: [{ role: 'user', content: 'private attempt prompt' }] } });
+    expect(response.statusCode).toBe(200);
+    const terminal = records.at(-1)!;
+    expect(terminal.attempts).toMatchObject([
+      { index: 0, modelId: 'attempt-first', provider: 'first', status: 'failed', errorCode: 'provider_error' },
+      { index: 1, modelId: 'attempt-second', provider: 'second', status: 'completed', usage: { totalTokens: 5 } },
+    ]);
+    expect(JSON.stringify(terminal)).not.toContain('private attempt prompt');
+    expect(JSON.stringify(terminal)).not.toContain('private output');
+    expect(JSON.stringify(terminal)).not.toContain('secret upstream details');
   });
 
   it('simulates routing and lists visible models without invoking a provider', async () => {
@@ -95,6 +145,6 @@ describe('routing query APIs', () => {
     app = await buildApp(base, { registry: new InMemoryModelRegistry([first, second]), providers, decisions });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { requestId: 'stream-fallback', stream: true, messages: [{ role: 'user', content: 'hello' }] } });
     expect(response.statusCode).toBe(200);
-    expect(records.at(-1)).toMatchObject({ state: 'completed', route: { selected: { model: { id: 'second' } } }, outcome: { provider: 'second', model: second.model } });
+    expect(records.at(-1)).toMatchObject({ state: 'completed', route: { selected: { model: { id: 'second' } } }, outcome: { provider: 'second', model: second.model }, attempts: [{ index: 0, provider: 'first', status: 'failed' }, { index: 1, provider: 'second', status: 'completed' }] });
   });
 });

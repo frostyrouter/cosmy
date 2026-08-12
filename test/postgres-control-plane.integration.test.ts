@@ -115,6 +115,21 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await expect(decisions.get('control-other', record.id)).resolves.toBeUndefined();
   });
 
+  it('persists route-less rejections and candidate attempt history', async () => {
+    const decisions = new PostgresDecisionStore(db);
+    const { route: _route, ...rejectionBase } = newDecisionRecord();
+    const rejected: import('../src/domain/types.js').DecisionRecord = {
+      ...rejectionBase, id: 'control-rejected', tenantId: 'control-tenant', state: 'rejected', attempts: [], errorCode: 'no_eligible_model',
+      rejection: { code: 'no_eligible_model', statusCode: 422, retryable: false, candidates: [{ modelId: 'candidate', reason: 'max_cost_exceeded' }] },
+    };
+    await decisions.save(rejected);
+    await expect(decisions.get('control-tenant', rejected.id)).resolves.toMatchObject({ state: 'rejected', route: undefined, attempts: [], rejection: { candidates: [{ reason: 'max_cost_exceeded' }] } });
+
+    const completed = newDecisionRecord({ id: 'control-attempts', tenantId: 'control-tenant', state: 'completed', attempts: [{ index: 0, modelId: 'candidate', model: 'candidate-v1', provider: 'provider-a', status: 'failed', latencyMs: 12, startedAt: '2026-08-12T00:00:00.000Z', completedAt: '2026-08-12T00:00:00.012Z', errorCode: 'provider_error' }] });
+    await decisions.save(completed);
+    await expect(decisions.get('control-tenant', completed.id)).resolves.toMatchObject({ state: 'completed', attempts: [{ modelId: 'candidate', status: 'failed', errorCode: 'provider_error' }] });
+  });
+
   it('converges a second router instance on a committed registry version', async () => {
     const key = 'control-plane-integration-admin';
     const config = {

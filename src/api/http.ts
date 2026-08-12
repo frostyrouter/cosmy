@@ -4,6 +4,7 @@ import { NoRouteError, ProviderError, RouterError } from '../domain/errors.js';
 import type { ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
 import type { ApiScope, RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
+import { requestId } from '../util/ids.js';
 
 function errorBody(error: unknown, requestId?: string): { error: { code: string; message: string; requestId?: string; retryable?: boolean; details?: unknown } } {
   if (error instanceof NoRouteError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable, details: { rejected: error.rejected } } };
@@ -105,6 +106,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     let requestKey: string | undefined;
     try {
       input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator));
+      input = input.requestId ? input : { ...input, requestId: requestId() };
       requestKey = idempotencyKey(request.headers['idempotency-key']);
       if (input.stream && requestKey) throw new RouterError('Idempotency-Key is not supported for streaming requests', 'invalid_request', 400);
     } catch (error) {

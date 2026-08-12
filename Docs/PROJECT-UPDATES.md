@@ -1,5 +1,14 @@
 # Project updates
 
+## 2026-08-12 - Complete routing decision evidence (commit pending)
+
+- Change: Added route-less durable records for semantic/routing rejections and ordered, privacy-safe candidate attempt history for completion, failure, cancellation, validation fallback, and streaming fallback.
+- Reliability: Provider streams that end without a terminal event now fail and may fall back before visible output instead of being falsely recorded as completed.
+- Privacy/latency: Attempts retain normalized model/provider/status/latency/error/usage data but no prompts, outputs, raw provider errors, credentials, or provider request IDs. They reuse the terminal decision update rather than adding a database write per fallback.
+- Operations: Apply migration 011. Malformed transport/schema requests and authentication/rate-limit failures remain pre-routing admission telemetry, not routing decisions. Candidate history aggregates provider-internal retries.
+- Validation: 174 tests passed locally (17 PostgreSQL tests skipped without a database), plus TypeScript lint, production build, diff whitespace validation, and a 20,000-request benchmark with zero errors. The benchmark produced about 624 requests/second and 126.5 ms p95 on this development host; repeated samples showed substantial host contention, so deployment load testing—not this laptop result—remains the latency release gate. Real-PostgreSQL rejection/attempt coverage is included for CI.
+- Limitation: A process crash after provider work but before the terminal decision update leaves the planned route but cannot reconstruct in-memory attempt history; per-attempt synchronous writes were intentionally avoided on the latency-sensitive path.
+
 ## 2026-08-12 - Shared PostgreSQL provider health (commit pending)
 
 - Change: Added an atomic provider-health aggregate, asynchronous event persistence on a dedicated bounded pool, and periodic cross-instance snapshot refresh while preserving immediate local routing feedback.
@@ -14,7 +23,7 @@ This file is the shared implementation record for the Cosmy router. New feature 
 
 - Change: Moved the overall request deadline to service admission so it includes semantic classification, routing, planned-decision persistence, provider fallback/retries, and completion or streaming time to first canonical event.
 - Semantics: Non-streaming and pre-output streaming deadline expiry return retryable HTTP 504 `timeout`; caller cancellation stays distinct. Streaming releases the timer after its first visible text/tool event so long valid streams are not truncated.
-- Audit: A timed-out request with a planned route now persists terminal `errorCode: timeout` instead of being misclassified as a client cancellation. Pre-route classifier timeouts have no decision record because no route exists.
+- Audit: A timed-out request with a planned route persists terminal `errorCode: timeout` instead of being misclassified as a client cancellation. Pre-route classifier timeouts now persist route-less rejected decisions.
 - Files: Service deadline composition, application wiring, classifier/HTTP/audit regressions, and runtime documentation.
 - Validation: 168 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
 - Boundary: Store operations without cancellation rely on their own bounded query timeouts; the overall timer cannot forcibly interrupt an arbitrary non-cooperative promise.
