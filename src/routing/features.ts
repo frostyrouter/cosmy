@@ -28,17 +28,18 @@ function countWords(text: string): number {
 }
 
 export function extractFeatures(input: ResponseRequest): RequestFeatures {
-  const text = input.messages.map((message) => message.content).join('\n');
-  const technical = countMatches(text, technicalTerms);
-  const creative = countMatches(text, creativeTerms);
-  const reasoning = countMatches(text, reasoningTerms);
-  const words = countWords(text);
-  const lower = text.toLowerCase();
+  const semanticText = input.messages.filter((message) => message.role !== 'tool').map((message) => message.content).join('\n');
+  const billableText = input.messages.map((message) => `${message.content}${message.toolCalls?.map((call) => JSON.stringify(call)).join('') ?? ''}`).join('\n');
+  const technical = countMatches(semanticText, technicalTerms);
+  const creative = countMatches(semanticText, creativeTerms);
+  const reasoning = countMatches(semanticText, reasoningTerms);
+  const words = countWords(semanticText);
+  const lower = semanticText.toLowerCase();
   const modalities: Modality[] = ['text'];
   if (lower.includes('[image]') || lower.includes('image input')) modalities.push('image');
   if (lower.includes('[file]') || lower.includes('attached file')) modalities.push('file');
   return {
-    inputTokens: estimateTokens(text),
+    inputTokens: estimateTokens(billableText),
     requestedOutputTokens: input.maxOutputTokens ?? 1_000,
     messageCount: input.messages.length,
     modalities,

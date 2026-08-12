@@ -5,9 +5,25 @@ import { parseToolArguments, syntheticToolCallId, toolCallId, toolName } from '.
 
 export interface AnthropicProviderOptions { apiKey: string; baseUrl?: string; version?: string; http?: HttpClient; }
 
-function messagesFor(request: ResponseRequest): { system?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> } {
+type AnthropicContent = string | Array<Record<string, unknown>>;
+
+function messagesFor(request: ResponseRequest): { system?: string; messages: Array<{ role: 'user' | 'assistant'; content: AnthropicContent }> } {
   const system = request.messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n') || undefined;
-  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = request.messages.filter((message) => message.role !== 'system').map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content }));
+  const messages: Array<{ role: 'user' | 'assistant'; content: AnthropicContent }> = [];
+  for (const message of request.messages.filter((candidate) => candidate.role !== 'system')) {
+    if (message.role === 'tool') {
+      const block = { type: 'tool_result', tool_use_id: message.toolCallId, content: message.content, ...(message.toolError ? { is_error: true } : {}) };
+      const previous = messages.at(-1);
+      if (previous?.role === 'user' && Array.isArray(previous.content) && previous.content.every((item) => item.type === 'tool_result')) previous.content.push(block);
+      else messages.push({ role: 'user', content: [block] });
+      continue;
+    }
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      messages.push({ role: 'assistant', content: [...(message.content ? [{ type: 'text', text: message.content }] : []), ...message.toolCalls.map((call) => ({ type: 'tool_use', id: call.id, name: call.name, input: call.arguments }))] });
+      continue;
+    }
+    messages.push({ role: message.role === 'assistant' ? 'assistant' : 'user', content: message.content });
+  }
   return system === undefined ? { messages } : { system, messages };
 }
 

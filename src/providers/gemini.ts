@@ -7,7 +7,19 @@ export interface GeminiProviderOptions { apiKey: string; baseUrl?: string; http?
 
 function requestBody(input: ProviderRequest): Record<string, unknown> {
   const system = input.request.messages.filter((message) => message.role === 'system').map((message) => ({ text: message.content }));
-  const contents = input.request.messages.filter((message) => message.role !== 'system').map((message) => ({ role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }] }));
+  const contents: Array<{ role: string; parts: Record<string, unknown>[] }> = [];
+  for (const message of input.request.messages.filter((candidate) => candidate.role !== 'system')) {
+    if (message.role === 'tool') {
+      const part = { functionResponse: { id: message.toolCallId, name: message.name, response: toolResult(message.content, message.toolError) } };
+      const previous = contents.at(-1);
+      if (previous?.role === 'user' && previous.parts.every((candidate) => 'functionResponse' in candidate)) previous.parts.push(part);
+      else contents.push({ role: 'user', parts: [part] });
+      continue;
+    }
+    const parts: Record<string, unknown>[] = [...(message.content ? [{ text: message.content }] : [])];
+    for (const call of message.toolCalls ?? []) parts.push({ functionCall: { id: call.id, name: call.name, args: call.arguments } });
+    contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts });
+  }
   const body: Record<string, unknown> = { contents, generationConfig: { ...(input.request.maxOutputTokens ? { maxOutputTokens: input.request.maxOutputTokens } : {}), ...(input.request.temperature !== undefined ? { temperature: input.request.temperature } : {}), ...(input.request.responseFormat?.type === 'json-schema' ? { responseMimeType: 'application/json', responseSchema: input.request.responseFormat.schema } : {}) } };
   if (system.length) body.systemInstruction = { parts: system };
   if (input.request.tools?.length) body.tools = [{ functionDeclarations: input.request.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })) }];
@@ -24,6 +36,12 @@ function usageOf(value: Record<string, unknown>, model: ModelConfiguration): Usa
 function outputOf(value: Record<string, unknown>): string {
   const candidate = asRecord(asArray(value.candidates)[0]);
   return asArray(asRecord(candidate.content).parts).map((part) => asString(asRecord(part).text)).filter(Boolean).join('');
+}
+
+function toolResult(content: string, failed?: boolean): Record<string, unknown> {
+  let result: unknown = content;
+  try { result = JSON.parse(content); } catch { /* Preserve text results. */ }
+  return failed ? { error: result } : { result };
 }
 
 function toolCallsOf(value: Record<string, unknown>, requestId?: string): ToolCall[] {

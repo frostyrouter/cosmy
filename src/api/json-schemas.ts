@@ -3,8 +3,11 @@ const messageSchema = {
   additionalProperties: false,
   properties: {
     role: { type: 'string', enum: ['system', 'user', 'assistant', 'tool'] },
-    content: { type: 'string', minLength: 1 },
+    content: { type: 'string' },
     name: { type: 'string', minLength: 1 },
+    toolCalls: { type: 'array', minItems: 1, maxItems: 128, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', minLength: 1, maxLength: 256 }, name: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' }, arguments: { type: 'object', additionalProperties: true } }, required: ['id', 'name', 'arguments'] } },
+    toolCallId: { type: 'string', minLength: 1, maxLength: 256 },
+    toolError: { type: 'boolean' },
   },
   required: ['role', 'content'],
 } as const;

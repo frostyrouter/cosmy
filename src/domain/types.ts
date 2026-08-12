@@ -7,6 +7,9 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   name?: string;
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+  toolError?: boolean;
 }
 
 export interface ResponseRequest {

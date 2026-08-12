@@ -150,7 +150,7 @@ Tool definitions use JSON Schema. The canonical tool loop distinguishes:
 
 Provider-hosted tools are non-portable capabilities and must be named in route eligibility. Tool results reference stable call IDs. Parallel calls preserve individual status and errors.
 
-Implementation note: provider calls are normalized and returned for client execution, including fragmented streaming arguments. A managed execution loop and first-class tool-result continuation input remain proposed.
+Implementation note: provider calls are normalized and returned for client execution, including fragmented streaming arguments. Stateless tool-result continuation is implemented through assistant `toolCalls` plus matched tool messages; see [tool-result continuations](31-tool-result-continuations.md). A Cosmy-managed execution loop remains proposed.
 
 ## Structured output
 

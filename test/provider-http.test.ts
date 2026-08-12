@@ -143,3 +143,59 @@ describe('multi-provider normalization', () => {
     expect(chunks.at(-2)).toMatchObject({ toolCallId: 'req_gs:tool:0', toolArguments: { city: 'Paris' } });
   });
 });
+
+describe('tool-result continuation requests', () => {
+  const messages = [
+    { role: 'user' as const, content: 'What is the weather?' },
+    { role: 'assistant' as const, content: '', toolCalls: [{ id: 'call_1', name: 'weather', arguments: { city: 'Paris' } }] },
+    { role: 'tool' as const, content: '{"temperature":20}', name: 'weather', toolCallId: 'call_1' },
+  ];
+
+  it('preserves calls and results in OpenAI Responses input items', async () => {
+    let body: Record<string, unknown> = {};
+    const provider = new OpenAIProvider({ apiKey: 'test', http: { request: async (_url, init) => { body = JSON.parse(String(init.body)); return new Response(JSON.stringify({ output_text: '20C', usage: {}, status: 'completed' }), { status: 200 }); } } }, [model]);
+    await provider.complete({ request: { messages }, model, signal: new AbortController().signal });
+    expect(body.input).toEqual([
+      { role: 'user', content: 'What is the weather?' },
+      { type: 'function_call', call_id: 'call_1', name: 'weather', arguments: '{"city":"Paris"}' },
+      { type: 'function_call_output', call_id: 'call_1', output: '{"temperature":20}' },
+    ]);
+  });
+
+  it('preserves calls and results in Anthropic content blocks', async () => {
+    let body: Record<string, unknown> = {};
+    const anthropicModel = { ...model, provider: 'anthropic', model: 'claude-test' };
+    const provider = new AnthropicProvider({ apiKey: 'test', http: { request: async (_url, init) => { body = JSON.parse(String(init.body)); return new Response(JSON.stringify({ content: [{ type: 'text', text: '20C' }], usage: {}, stop_reason: 'end_turn' }), { status: 200 }); } } }, [anthropicModel]);
+    await provider.complete({ request: { messages }, model: anthropicModel, signal: new AbortController().signal });
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'What is the weather?' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'call_1', name: 'weather', input: { city: 'Paris' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: '{"temperature":20}' }] },
+    ]);
+  });
+
+  it('groups parallel Anthropic tool results into one user turn', async () => {
+    let body: Record<string, unknown> = {};
+    const parallel = [
+      { role: 'assistant' as const, content: '', toolCalls: [{ id: 'call_1', name: 'weather', arguments: {} }, { id: 'call_2', name: 'clock', arguments: {} }] },
+      { role: 'tool' as const, content: 'sunny', name: 'weather', toolCallId: 'call_1' },
+      { role: 'tool' as const, content: 'noon', name: 'clock', toolCallId: 'call_2' },
+    ];
+    const anthropicModel = { ...model, provider: 'anthropic', model: 'claude-test' };
+    const provider = new AnthropicProvider({ apiKey: 'test', http: { request: async (_url, init) => { body = JSON.parse(String(init.body)); return new Response(JSON.stringify({ content: [], usage: {}, stop_reason: 'end_turn' }), { status: 200 }); } } }, [anthropicModel]);
+    await provider.complete({ request: { messages: parallel }, model: anthropicModel, signal: new AbortController().signal });
+    expect((body.messages as Array<{ content: unknown[] }>).at(-1)?.content).toHaveLength(2);
+  });
+
+  it('preserves calls and matching IDs in Gemini function parts', async () => {
+    let body: Record<string, unknown> = {};
+    const geminiModel = { ...model, provider: 'gemini', model: 'gemini-test' };
+    const provider = new GeminiProvider({ apiKey: 'test', http: { request: async (_url, init) => { body = JSON.parse(String(init.body)); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '20C' }] }, finishReason: 'STOP' }], usageMetadata: {} }), { status: 200 }); } } }, [geminiModel]);
+    await provider.complete({ request: { messages }, model: geminiModel, signal: new AbortController().signal });
+    expect(body.contents).toEqual([
+      { role: 'user', parts: [{ text: 'What is the weather?' }] },
+      { role: 'model', parts: [{ functionCall: { id: 'call_1', name: 'weather', args: { city: 'Paris' } } }] },
+      { role: 'user', parts: [{ functionResponse: { id: 'call_1', name: 'weather', response: { result: { temperature: 20 } } } }] },
+    ]);
+  });
+});

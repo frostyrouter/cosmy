@@ -36,4 +36,4 @@ Parallel provider tool calls retain their native output index and stable call ID
 
 ## Boundaries
 
-This milestone returns calls for client execution; it does not execute tools inside Cosmy and does not yet accept a first-class `tool_call_id` result object for a managed multi-turn loop. The existing message shape can carry textual tool context, but full continuation semantics require a versioned canonical input-item contract. Provider-hosted tools are also outside this portable function-call subset.
+This milestone returns calls for client execution; Cosmy does not execute tools itself. First-class stateless tool-result continuation is now documented in [tool-result continuations](31-tool-result-continuations.md). Provider-hosted tools and provider-private continuation state remain outside this portable function-call subset.

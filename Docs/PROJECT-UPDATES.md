@@ -2,6 +2,15 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-12 - Stateless tool-result continuation (commit pending)
+
+- Change: Extended canonical messages with assistant tool-call history and matched tool-result messages, then translated full stateless continuation histories for OpenAI, Anthropic, and Gemini while preserving call IDs and explicit tool errors.
+- Safety: Requests fail before routing/provider work on undeclared tools, duplicate or unknown call IDs, name mismatches, incomplete parallel results, invalid ordering, or role-incompatible fields. Tool results stay in native result containers and are excluded from semantic classifier input and shadow execution.
+- Accuracy: Tool-call arguments and result content count toward context/cost estimation even though untrusted tool output cannot steer semantic classification.
+- Files: Request/domain schema, conversation validator, service admission, provider request adapters, feature extraction, provider/HTTP regressions, and client workflow documentation.
+- Validation: 166 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Execution remains client-owned. Cosmy does not authorize or run tools, and provider-private thought signatures/hosted-tool state are not portable in this stateless subset.
+
 ## 2026-08-12 - Provider-neutral tool calls and typed streams (commit pending)
 
 - Change: Normalized OpenAI function calls, Anthropic tool-use blocks, and Gemini function calls into stable `{ id, name, arguments }` response objects with `finishReason: tool_calls`; fragmented and parallel tool-call streams now preserve call identity and output indexes.

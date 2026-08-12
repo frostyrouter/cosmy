@@ -7,6 +7,7 @@ import { RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { DecisionStore, IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
 import type { MetricsSink } from '../observability/metrics.js';
 import type { ShadowScheduler } from '../shadow/coordinator.js';
+import { validateConversation } from './request-validation.js';
 
 function cacheKey(request: ResponseRequest, policyVersion: string | undefined, registryVersion: number | undefined, modelId: string, modelVersion: string): string {
   const normalized = { ...request, requestId: undefined, stream: false };
@@ -51,6 +52,7 @@ export class RouterService {
   ) {}
 
   async simulate(request: ResponseRequest, signal: AbortSignal): Promise<RouteDecision> {
+    validateConversation(request);
     if (signal.aborted) throw new RequestCancelledError();
     return this.router.decide(request.requestId ?? requestId(), request);
   }
@@ -67,6 +69,7 @@ export class RouterService {
   }
 
   async complete(request: ResponseRequest, signal: AbortSignal, idempotencyKey?: string): Promise<ResponseResult> {
+    validateConversation(request);
     if (!idempotencyKey || !this.idempotency) return this.completeOnce(request, signal);
     const tenantId = request.policy?.tenantId ?? 'anonymous';
     const hash = requestHash(request);
@@ -129,6 +132,7 @@ export class RouterService {
   }
 
   async *stream(request: ResponseRequest, signal: AbortSignal): AsyncIterable<ResponseChunk> {
+    validateConversation(request);
     const id = request.requestId ?? requestId();
     const route = await this.router.decideAsync(id, request, signal);
     await this.saveDecision(request, route, 'planned', undefined, undefined, true);

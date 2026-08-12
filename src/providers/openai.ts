@@ -6,7 +6,14 @@ import { parseToolArguments, syntheticToolCallId, toolCallId, toolName } from '.
 export interface OpenAIProviderOptions { apiKey: string; baseUrl?: string; http?: HttpClient; }
 
 function inputFor(request: ResponseRequest): unknown[] {
-  return request.messages.map((message) => ({ role: message.role, content: message.content, ...(message.name ? { name: message.name } : {}) }));
+  const result: unknown[] = [];
+  for (const message of request.messages) {
+    if (message.role === 'tool') { result.push({ type: 'function_call_output', call_id: message.toolCallId!, output: message.content }); continue; }
+    const content = message.content.length ? [{ role: message.role, content: message.content, ...(message.name ? { name: message.name } : {}) }] : [];
+    const calls = message.toolCalls?.map((call) => ({ type: 'function_call', call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments) })) ?? [];
+    result.push(...content, ...calls);
+  }
+  return result;
 }
 
 function requestBody(input: ProviderRequest, stream: boolean): Record<string, unknown> {

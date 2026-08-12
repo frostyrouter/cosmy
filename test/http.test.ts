@@ -162,6 +162,20 @@ describe('HTTP API', () => {
     expect(response.json().error.code).toBe('invalid_request');
   });
 
+  it('validates tool-result continuation IDs before provider execution', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: {
+      messages: [
+        { role: 'user', content: 'Use weather' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'weather', arguments: { city: 'Paris' } }] },
+        { role: 'tool', content: '20C', name: 'weather', toolCallId: 'wrong_call' },
+      ],
+      tools: [{ name: 'weather', inputSchema: { type: 'object' } }],
+    } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatchObject({ code: 'invalid_request' });
+  });
+
   it('returns 400 for malformed JSON bodies instead of 500', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: '{not json', headers: { 'content-type': 'application/json' } });
