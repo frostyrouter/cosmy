@@ -27,4 +27,5 @@ export * from './rollouts/rollout.js';
 export * from './shadow/shadow.js';
 export * from './shadow/coordinator.js';
 export * from './persistence/sql-adapters.js';
+export * from './persistence/postgres-health-store.js';
 export * from './security/auth.js';

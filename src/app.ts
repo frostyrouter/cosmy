@@ -21,6 +21,7 @@ import type { BudgetAdministration, HealthSnapshotStore, HealthStore, ModelRegis
 import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
 import { PostgresControlPlaneStore, PostgresDecisionStore, PostgresIdempotencyStore, PostgresRegistryRepository, PostgresReservationRepository } from './persistence/sql-adapters.js';
+import { PostgresHealthStore } from './persistence/postgres-health-store.js';
 import { InMemoryResponseCache } from './persistence/memory-cache.js';
 import { InMemoryIdempotencyStore } from './persistence/memory-idempotency.js';
 import { InMemoryDecisionStore } from './persistence/memory-decisions.js';
@@ -69,6 +70,8 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   let postgres: PostgresSqlClient | undefined;
   let rolloutPostgres: PostgresSqlClient | undefined;
   let shadowPostgres: PostgresSqlClient | undefined;
+  let healthPostgres: PostgresSqlClient | undefined;
+  let sharedHealth: PostgresHealthStore | undefined;
   let registryRepository: PostgresRegistryRepository | undefined;
   let reservationRecovery: PostgresReservationRepository | undefined;
   let reservationHeartbeatMs = 30_000;
@@ -79,12 +82,15 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
       await applyControlPlaneMigration(postgres);
       rolloutPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 100, queryTimeoutMs: 200, connectionTimeoutMs: 200 });
       shadowPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 2_000, queryTimeoutMs: 3_000, connectionTimeoutMs: 500 });
+      if (!dependencies.health) healthPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 1_000, queryTimeoutMs: 1_500, connectionTimeoutMs: 500 });
     } catch (error) {
+      await healthPostgres?.close();
+      await shadowPostgres?.close();
       await rolloutPostgres?.close();
       await postgres.close();
       throw error;
     }
-    app.addHook('onClose', async () => { await shadowPostgres?.close(); await rolloutPostgres?.close(); await postgres?.close(); });
+    app.addHook('onClose', async () => { await sharedHealth?.flush(); await healthPostgres?.close(); await shadowPostgres?.close(); await rolloutPostgres?.close(); await postgres?.close(); });
   }
   const seedModels = [...defaultModels, ...configuredModelManifests(runtimeEnv)];
   let registry = dependencies.registry;
@@ -110,8 +116,14 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   if (!cache && config.cacheMode === 'memory') {
     cache = new InMemoryResponseCache();
   }
-  const health = dependencies.health ?? new InMemoryHealthStore();
   const metrics = dependencies.metrics ?? new InMemoryMetrics();
+  let health = dependencies.health;
+  if (!health && healthPostgres) {
+    sharedHealth = new PostgresHealthStore(healthPostgres, () => metrics.increment?.('health_store_failure'));
+    await sharedHealth.refresh();
+    health = sharedHealth;
+  }
+  health ??= new InMemoryHealthStore();
   registerMetricsRoute(app, metrics, authenticator);
   const providers = resilientProviders(configuredProviders(runtimeEnv, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
   const providerAdapters = dependencies.providers ?? providers;
@@ -174,6 +186,17 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
           if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
           if (controlStore && shadowCoordinator) shadowCoordinator.load(await controlStore.activeShadowCampaigns());
         }).catch((error: unknown) => { metrics.increment?.('registry_refresh_failure'); app.log.error({ err: error }, 'registry refresh failed'); });
+      }, refreshSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
+  if (sharedHealth) {
+    const refreshSeconds = config.healthRefreshSeconds ?? 2;
+    if (refreshSeconds > 0) {
+      const durableHealth = sharedHealth;
+      const timer = setInterval(() => {
+        void durableHealth.refresh().catch((error: unknown) => app.log.error({ err: error }, 'provider health refresh failed'));
       }, refreshSeconds * 1_000);
       timer.unref();
       app.addHook('onClose', async () => { clearInterval(timer); });

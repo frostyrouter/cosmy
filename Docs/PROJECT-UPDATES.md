@@ -1,5 +1,13 @@
 # Project updates
 
+## 2026-08-12 - Shared PostgreSQL provider health (commit pending)
+
+- Change: Added an atomic provider-health aggregate, asynchronous event persistence on a dedicated bounded pool, and periodic cross-instance snapshot refresh while preserving immediate local routing feedback.
+- Impact: Horizontally scaled PostgreSQL deployments now learn provider failures and recovery from one another without adding a database round trip to the provider response path.
+- Operations: Apply migration 010, keep `HEALTH_REFRESH_SECONDS` above zero for multiple instances, alert on `health_store_failure`, and define retention for append-only health events.
+- Validation: 170 tests passed (16 PostgreSQL tests skipped without a local database), including a stale-refresh race regression; TypeScript lint, production build, diff validation, and a 20,000-request benchmark passed with zero errors (about 695 requests/second and 112.6 ms p95 on the development machine). A real-PostgreSQL cross-instance test is included for CI.
+- Limitations and follow-up: Convergence is eventually consistent (default polling window two seconds), failed asynchronous events are not replayed automatically, and production load/fault testing remains required.
+
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
 ## 2026-08-12 - End-to-end routing and first-event deadlines (commit pending)

@@ -4,7 +4,7 @@
 
 Provider execution and automatic routing now share the same `HealthSnapshotStore`. Three consecutive non-cancellation execution failures temporarily remove a model from automatic routing for 30 seconds. The route decision records `observed_health_unavailable`, and an explicit request for that model fails with `no_eligible_model` rather than silently switching providers.
 
-A successful attempt resets the consecutive-failure counter. Observed success/error data adjusts reliability ranking, while the registry's latency p95 remains authoritative: a single local latency sample is not treated as a percentile. The default store is process-local, so a multi-instance production deployment still needs shared health aggregation or an external load-balancing/circuit signal.
+A successful attempt resets the consecutive-failure counter. Observed success/error data adjusts reliability ranking, while the registry's latency p95 remains authoritative: a single local latency sample is not treated as a percentile. Memory mode keeps this state process-local; PostgreSQL mode shares its aggregate across instances as described in [shared provider health](33-shared-provider-health.md).
 
 ## Structured-output guarantee
 

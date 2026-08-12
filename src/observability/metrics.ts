@@ -10,7 +10,7 @@ export interface RequestMetric {
   fallbackIndex: number;
 }
 
-export type OperationalMetric = 'cache_hit' | 'cache_failure' | 'decision_store_failure' | 'idempotency_store_failure' | 'reconciliation_failure' | 'registry_refresh_failure' | 'reservation_recovered' | 'rollout_observation_failure' | 'rollout_auto_rollback' | 'shadow_job_dropped' | 'shadow_execution_failure' | 'shadow_budget_rejection' | 'shadow_observation_recorded' | 'shadow_reservation_recovered';
+export type OperationalMetric = 'cache_hit' | 'cache_failure' | 'decision_store_failure' | 'health_store_failure' | 'idempotency_store_failure' | 'reconciliation_failure' | 'registry_refresh_failure' | 'reservation_recovered' | 'rollout_observation_failure' | 'rollout_auto_rollback' | 'shadow_job_dropped' | 'shadow_execution_failure' | 'shadow_budget_rejection' | 'shadow_observation_recorded' | 'shadow_reservation_recovered';
 
 export interface MetricsSink {
   record(metric: RequestMetric): void;
@@ -50,7 +50,7 @@ interface ProviderSeries {
 }
 
 const MAX_PROVIDER_SERIES = 512;
-const operationalNames: readonly OperationalMetric[] = ['cache_hit', 'cache_failure', 'decision_store_failure', 'idempotency_store_failure', 'reconciliation_failure', 'registry_refresh_failure', 'reservation_recovered', 'rollout_observation_failure', 'rollout_auto_rollback', 'shadow_job_dropped', 'shadow_execution_failure', 'shadow_budget_rejection', 'shadow_observation_recorded', 'shadow_reservation_recovered'];
+const operationalNames: readonly OperationalMetric[] = ['cache_hit', 'cache_failure', 'decision_store_failure', 'health_store_failure', 'idempotency_store_failure', 'reconciliation_failure', 'registry_refresh_failure', 'reservation_recovered', 'rollout_observation_failure', 'rollout_auto_rollback', 'shadow_job_dropped', 'shadow_execution_failure', 'shadow_budget_rejection', 'shadow_observation_recorded', 'shadow_reservation_recovered'];
 
 export class InMemoryMetrics implements MetricsSink {
   private requests = 0;

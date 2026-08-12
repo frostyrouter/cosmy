@@ -20,6 +20,7 @@ export interface AppConfig {
   reservationLeaseSeconds?: number;
   reconciliationSweepSeconds?: number;
   registryRefreshSeconds?: number;
+  healthRefreshSeconds?: number;
   classifierMode?: 'disabled' | 'degrade' | 'fail';
   classifierTimeoutMs?: number;
 }
@@ -61,6 +62,7 @@ function validateConfig(config: AppConfig): AppConfig {
   if (config.reservationLeaseSeconds !== undefined && (!Number.isInteger(config.reservationLeaseSeconds) || config.reservationLeaseSeconds <= 0)) throw new Error(`Expected a positive reservation lease, received '${config.reservationLeaseSeconds}'`);
   if (config.reconciliationSweepSeconds !== undefined && (!Number.isInteger(config.reconciliationSweepSeconds) || config.reconciliationSweepSeconds < 0)) throw new Error(`Expected a non-negative reconciliation interval, received '${config.reconciliationSweepSeconds}'`);
   if (config.registryRefreshSeconds !== undefined && (!Number.isInteger(config.registryRefreshSeconds) || config.registryRefreshSeconds < 0)) throw new Error(`Expected a non-negative registry refresh interval, received '${config.registryRefreshSeconds}'`);
+  if (config.healthRefreshSeconds !== undefined && (!Number.isInteger(config.healthRefreshSeconds) || config.healthRefreshSeconds < 0)) throw new Error(`Expected a non-negative health refresh interval, received '${config.healthRefreshSeconds}'`);
   if (config.classifierTimeoutMs !== undefined && (!Number.isFinite(config.classifierTimeoutMs) || config.classifierTimeoutMs <= 0)) throw new Error(`Expected a positive classifier timeout, received '${config.classifierTimeoutMs}'`);
   return config;
 }
@@ -123,6 +125,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     reservationLeaseSeconds: positiveIntegerEnv(env.RESERVATION_LEASE_SECONDS, 300),
     reconciliationSweepSeconds: nonNegativeIntegerEnv(env.RECONCILIATION_SWEEP_SECONDS, 30),
     registryRefreshSeconds: nonNegativeIntegerEnv(env.REGISTRY_REFRESH_SECONDS, 15),
+    healthRefreshSeconds: nonNegativeIntegerEnv(env.HEALTH_REFRESH_SECONDS, 2),
     classifierMode,
     classifierTimeoutMs: numberEnv(env.CLASSIFIER_TIMEOUT_MS, 3_000),
   });
