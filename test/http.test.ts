@@ -5,6 +5,7 @@ import { sha256ApiKey } from '../src/security/auth.js';
 import { SimulatorProvider } from '../src/providers/simulator.js';
 import { defaultModels } from '../src/registry/default-models.js';
 import { InMemoryMetrics } from '../src/observability/metrics.js';
+import type { ProviderAdapter } from '../src/ports/provider.js';
 
 describe('HTTP API', () => {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
@@ -21,6 +22,18 @@ describe('HTTP API', () => {
     expect(body.route.selected.model.id).toBeTruthy();
     expect(body.usage.totalTokens).toBeGreaterThan(0);
     expect(body.usage.totalTokens).toBe(body.usage.inputTokens + body.usage.outputTokens);
+  });
+
+  it('returns provider-neutral tool calls without dropping stable call IDs', async () => {
+    const provider: ProviderAdapter = {
+      name: 'simulator', listModels: () => defaultModels,
+      complete: async () => ({ output: '', toolCalls: [{ id: 'call_weather_1', name: 'weather', arguments: { city: 'Paris' } }], usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7, estimatedCostUsd: 0 }, finishReason: 'tool_calls' }),
+      stream: async function* () {},
+    };
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 }, { providers: [provider] });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'Check weather' }], tools: [{ name: 'weather', inputSchema: { type: 'object' } }] } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ finishReason: 'tool_calls', toolCalls: [{ id: 'call_weather_1', name: 'weather', arguments: { city: 'Paris' } }] });
   });
 
   it('resolves timeout and retry defaults for partial programmatic configuration', async () => {
@@ -162,7 +175,15 @@ describe('HTTP API', () => {
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'hello world' }] } });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/event-stream');
-    expect(response.body).toContain('event: done');
+    expect(response.body).toContain('event: response.completed');
+    expect(response.body).toContain('event: response.output_text.delta');
+    expect(response.body).toContain('event: response.created');
+    expect(response.body).toContain('event: response.route.selected');
+    expect(response.body).toContain('event: response.usage.updated');
+    const events = response.body.split('\n').filter((line) => line.startsWith('data: ')).map((line) => JSON.parse(line.slice(6)) as { responseId: string; sequence: number; type: string });
+    expect(events.map((event) => event.sequence)).toEqual(events.map((_event, index) => index));
+    expect(new Set(events.map((event) => event.responseId)).size).toBe(1);
+    expect(events.every((event) => event.type.startsWith('response.'))).toBe(true);
     expect(metrics.snapshot()).toMatchObject({ activeStreams: 0, successes: 1 });
   });
 

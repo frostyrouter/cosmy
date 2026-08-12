@@ -2,6 +2,15 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-12 - Provider-neutral tool calls and typed streams (commit pending)
+
+- Change: Normalized OpenAI function calls, Anthropic tool-use blocks, and Gemini function calls into stable `{ id, name, arguments }` response objects with `finishReason: tool_calls`; fragmented and parallel tool-call streams now preserve call identity and output indexes.
+- API: Replaced generic `delta`/`done` SSE names with typed response lifecycle, route, text, tool, usage, completion, and failure events carrying one response ID and monotonic sequence numbers. Existing non-streaming text output remains backward-compatible.
+- Reliability: Any observed tool event now blocks unsafe streaming fallback just like visible text. Terminal streaming decisions record the provider/model that actually served a fallback instead of the originally planned primary.
+- Files: Canonical domain/provider contracts, OpenAI/Anthropic/Gemini/simulator adapters, executor, service/audit persistence, HTTP/SSE encoding, response schema, tests, and protocol documentation.
+- Validation: 161 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Cosmy returns client-executed function calls but does not yet run tools or provide a first-class tool-result continuation item. Provider-hosted tools and managed tool loops remain follow-up work.
+
 ## 2026-08-12 - Live health admission and structured-output enforcement (commit pending)
 
 - Change: Connected execution health observations back into routing. Three consecutive failures temporarily reject a model with `observed_health_unavailable`; successful probes restore it, and explicit unhealthy model requests fail instead of silently changing models.

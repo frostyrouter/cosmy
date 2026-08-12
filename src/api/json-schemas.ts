@@ -13,7 +13,7 @@ const toolSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    name: { type: 'string', minLength: 1 },
+    name: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
     description: { type: 'string' },
     inputSchema: { type: 'object', additionalProperties: true },
   },
@@ -164,6 +164,12 @@ const usageSchema = {
   required: ['inputTokens', 'outputTokens', 'totalTokens', 'estimatedCostUsd'],
 } as const;
 
+const toolCallSchema = {
+  type: 'object', additionalProperties: false,
+  properties: { id: { type: 'string', minLength: 1, maxLength: 256 }, name: { type: 'string', minLength: 1, maxLength: 128 }, arguments: { type: 'object', additionalProperties: true } },
+  required: ['id', 'name', 'arguments'],
+} as const;
+
 export const responseResultJsonSchema = {
   type: 'object',
   additionalProperties: true,
@@ -172,9 +178,10 @@ export const responseResultJsonSchema = {
     model: { type: 'string' },
     provider: { type: 'string' },
     output: { type: 'string' },
+    toolCalls: { type: 'array', items: toolCallSchema },
     usage: usageSchema,
     status: { type: 'string', enum: ['completed', 'failed', 'cancelled'] },
-    finishReason: { type: 'string', enum: ['stop', 'length', 'error', 'cancelled'] },
+    finishReason: { type: 'string', enum: ['stop', 'length', 'tool_calls', 'error', 'cancelled'] },
     route: {
       type: 'object',
       additionalProperties: true,

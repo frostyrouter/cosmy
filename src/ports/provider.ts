@@ -1,4 +1,4 @@
-import type { ModelConfiguration, ResponseRequest, ResponseChunk, Usage } from '../domain/types.js';
+import type { ModelConfiguration, ResponseRequest, ResponseChunk, ToolCall, Usage } from '../domain/types.js';
 
 export interface ProviderRequest {
   request: ResponseRequest;
@@ -8,8 +8,9 @@ export interface ProviderRequest {
 
 export interface ProviderResponse {
   output: string;
+  toolCalls?: ToolCall[];
   usage: Usage;
-  finishReason: 'stop' | 'length';
+  finishReason: 'stop' | 'length' | 'tool_calls';
 }
 
 export interface ProviderAdapter {

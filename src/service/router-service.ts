@@ -133,12 +133,19 @@ export class RouterService {
     const route = await this.router.decideAsync(id, request, signal);
     await this.saveDecision(request, route, 'planned', undefined, undefined, true);
     let terminal: ResponseChunk | undefined;
+    let executedRoute = route;
+    let toolCalled = false;
     try {
-      for await (const chunk of this.executor.stream({ requestId: id, route, request, signal })) { terminal = chunk.done ? chunk : terminal; yield chunk; }
-      const outcome: DecisionOutcome = { provider: route.selected.model.provider, model: route.selected.model.model, status: 'completed', finishReason: 'stop', ...(terminal?.usage ? { usage: terminal.usage } : {}) };
-      await this.saveDecision(request, route, 'completed', outcome);
+      for await (const chunk of this.executor.stream({ requestId: id, route, request, signal })) {
+        if (chunk.route) executedRoute = chunk.route;
+        if (chunk.type?.startsWith('tool-call')) toolCalled = true;
+        terminal = chunk.done ? chunk : terminal;
+        yield chunk;
+      }
+      const outcome: DecisionOutcome = { provider: executedRoute.selected.model.provider, model: executedRoute.selected.model.model, status: 'completed', finishReason: toolCalled ? 'tool_calls' : 'stop', ...(terminal?.usage ? { usage: terminal.usage } : {}) };
+      await this.saveDecision(request, executedRoute, 'completed', outcome);
     } catch (error) {
-      await this.saveFailedDecision(request, route, error);
+      await this.saveFailedDecision(request, executedRoute, error);
       throw error;
     }
   }

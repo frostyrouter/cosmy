@@ -5,6 +5,9 @@ import type { ProviderAdapter } from '../src/ports/provider.js';
 import { defaultModels } from '../src/registry/default-models.js';
 import { InMemoryMetrics } from '../src/observability/metrics.js';
 import type { DecisionStore } from '../src/persistence/contracts.js';
+import { InMemoryModelRegistry } from '../src/registry/memory-registry.js';
+import { ProviderError } from '../src/domain/errors.js';
+import type { DecisionRecord } from '../src/domain/types.js';
 
 const base = { host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' as const, requestTimeoutMs: 60_000, providerMaxRetries: 0 };
 
@@ -78,5 +81,20 @@ describe('routing query APIs', () => {
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'complete despite telemetry failure' }] } });
     expect(response.statusCode).toBe(200);
     expect(metrics.snapshot().operational.decision_store_failure).toBe(1);
+  });
+
+  it('records the provider that actually served a streaming fallback', async () => {
+    const first = { ...defaultModels[0]!, id: 'first', provider: 'first' };
+    const second = { ...defaultModels[1]!, id: 'second', provider: 'second' };
+    const records: DecisionRecord[] = [];
+    const decisions: DecisionStore = { save: async (record) => { records.push(structuredClone(record)); }, get: async () => undefined };
+    const providers: ProviderAdapter[] = [
+      { name: 'first', listModels: () => [first], complete: async () => { throw new Error('unused'); }, stream: async function* () { throw new ProviderError('unavailable', true); } },
+      { name: 'second', listModels: () => [second], complete: async () => { throw new Error('unused'); }, stream: async function* () { yield { requestId: 'stream-fallback', index: 0, delta: 'ok', done: false, type: 'text-delta' }; yield { requestId: 'stream-fallback', index: 1, delta: '', done: true, type: 'completed', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 } }; } },
+    ];
+    app = await buildApp(base, { registry: new InMemoryModelRegistry([first, second]), providers, decisions });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { requestId: 'stream-fallback', stream: true, messages: [{ role: 'user', content: 'hello' }] } });
+    expect(response.statusCode).toBe(200);
+    expect(records.at(-1)).toMatchObject({ state: 'completed', route: { selected: { model: { id: 'second' } } }, outcome: { provider: 'second', model: second.model } });
   });
 });

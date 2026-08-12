@@ -128,6 +128,8 @@ response.failed
 
 Every event contains response ID, sequence number, event type, and typed payload. Sequence numbers are monotonic per response. Clients ignore unknown event types for forward compatibility.
 
+Implementation note: typed text, route, tool-call, usage, completion, and failure events are implemented. See [normalized tools and events](30-normalized-tools-and-events.md). Cancellation endpoints and asynchronous reconnect remain proposed.
+
 ## Cancellation
 
 Closing the client connection requests cancellation but is not proof of provider cancellation. An explicit endpoint is available for asynchronous work:
@@ -147,6 +149,8 @@ Tool definitions use JSON Schema. The canonical tool loop distinguishes:
 - Provider-hosted tools
 
 Provider-hosted tools are non-portable capabilities and must be named in route eligibility. Tool results reference stable call IDs. Parallel calls preserve individual status and errors.
+
+Implementation note: provider calls are normalized and returned for client execution, including fragmented streaming arguments. A managed execution loop and first-class tool-result continuation input remain proposed.
 
 ## Structured output
 

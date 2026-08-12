@@ -24,6 +24,10 @@ function authorize(authorization: string | undefined, authenticator: RequestAuth
   return principal;
 }
 
+function responseEvent(responseId: string, sequence: number, type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
+  return { responseId, sequence, type, ...payload };
+}
+
 function tenantRequest(input: ResponseRequest, principal: RequestPrincipal | undefined): ResponseRequest {
   const tenantId = principal?.tenantId ?? 'anonymous';
   if (input.policy?.tenantId && input.policy.tenantId !== tenantId) {
@@ -125,15 +129,21 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
         reply.raw.setHeader('content-type', 'text/event-stream');
         reply.raw.setHeader('cache-control', 'no-cache');
         reply.raw.setHeader('connection', 'keep-alive');
+        let sequence = 0;
+        const emit = (type: string, payload: Record<string, unknown> = {}) => writeSse(reply, type, responseEvent(first.value?.requestId ?? input.requestId ?? 'unknown', sequence++, type, payload));
         try {
-          if (!first.done) writeSse(reply, first.value.done ? 'done' : 'delta', first.value);
+          if (!first.done) {
+            emit('response.created', { status: 'in_progress' });
+            if (first.value.route) emit('response.route.selected', { decisionId: first.value.route.requestId, model: first.value.route.selected.model.model, provider: first.value.route.selected.model.provider });
+            emitChunk(first.value, emit);
+          }
           while (!first.done) {
             first = await iterator.next();
-            if (!first.done) writeSse(reply, first.value.done ? 'done' : 'delta', first.value);
+            if (!first.done) emitChunk(first.value, emit);
           }
         } catch (error) {
           request.log.warn({ err: error }, 'stream failed');
-          writeSse(reply, 'error', errorBody(error, input.requestId));
+          emit('response.failed', errorBody(error, input.requestId));
         } finally {
           reply.raw.end();
         }
@@ -146,4 +156,21 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
       return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
     }
   });
+}
+
+function emitChunk(chunk: import('../domain/types.js').ResponseChunk, emit: (type: string, payload?: Record<string, unknown>) => void): void {
+  const outputIndex = chunk.outputIndex ?? chunk.index;
+  if (chunk.type === 'tool-call-added') {
+    emit('response.output_item.added', { outputIndex, item: { type: 'function_call', id: chunk.toolCallId, name: chunk.toolName, arguments: {} } });
+  } else if (chunk.type === 'tool-call-arguments-delta') {
+    emit('response.tool_call.arguments.delta', { outputIndex, callId: chunk.toolCallId, name: chunk.toolName, delta: chunk.delta });
+  } else if (chunk.type === 'tool-call-done') {
+    emit('response.output_item.done', { outputIndex, item: { type: 'function_call', id: chunk.toolCallId, name: chunk.toolName, arguments: chunk.toolArguments ?? {} } });
+  } else if (!chunk.done) {
+    emit('response.output_text.delta', { outputIndex, delta: chunk.delta });
+  }
+  if (chunk.done) {
+    if (chunk.usage) emit('response.usage.updated', { usage: chunk.usage });
+    emit('response.completed', { status: 'completed' });
+  }
 }

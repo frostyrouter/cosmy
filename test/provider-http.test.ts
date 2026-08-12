@@ -35,6 +35,28 @@ describe('OpenAI provider adapter', () => {
     expect(chunks.at(-1)?.usage?.totalTokens).toBe(3);
   });
 
+  it('normalizes complete and fragmented Responses API function calls', async () => {
+    const stream = [
+      'event: response.output_item.added\ndata: {"output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"weather","arguments":""}}\n\n',
+      'event: response.function_call_arguments.delta\ndata: {"output_index":0,"delta":"{\\"city\\":\\"Pa"}\n\n',
+      'event: response.function_call_arguments.delta\ndata: {"output_index":0,"delta":"ris\\"}"}\n\n',
+      'event: response.function_call_arguments.done\ndata: {"output_index":0,"arguments":"{\\"city\\":\\"Paris\\"}"}\n\n',
+      'event: response.completed\ndata: {"response":{"usage":{"input_tokens":2,"output_tokens":4}}}\n\n',
+    ].join('');
+    const responses = [
+      new Response(JSON.stringify({ output: [{ type: 'function_call', call_id: 'call_1', name: 'weather', arguments: '{"city":"Paris"}' }], usage: { input_tokens: 2, output_tokens: 4 }, status: 'completed' }), { status: 200 }),
+      new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(stream)); controller.close(); } }), { status: 200 }),
+    ];
+    const provider = new OpenAIProvider({ apiKey: 'test', http: { request: async () => responses.shift()! } }, [model]);
+    const complete = await provider.complete({ request: { requestId: 'req_tools', messages: [{ role: 'user', content: 'weather' }] }, model, signal: new AbortController().signal });
+    expect(complete).toMatchObject({ finishReason: 'tool_calls', toolCalls: [{ id: 'call_1', name: 'weather', arguments: { city: 'Paris' } }] });
+    const chunks = [];
+    for await (const chunk of provider.stream({ request: { requestId: 'req_tools', messages: [{ role: 'user', content: 'weather' }] }, model, signal: new AbortController().signal })) chunks.push(chunk);
+    expect(chunks.map((chunk) => chunk.type)).toEqual(['tool-call-added', 'tool-call-arguments-delta', 'tool-call-arguments-delta', 'tool-call-done', 'completed']);
+    expect(chunks.at(-2)?.toolArguments).toEqual({ city: 'Paris' });
+    expect(chunks.at(-1)?.usage?.totalTokens).toBe(6);
+  });
+
   it('emits a trailing SSE data line without a final newline', async () => {
     const stream = 'event: response.output_text.delta\ndata: {"delta":"tail"}';
     const provider = new OpenAIProvider({ apiKey: 'test', http: { request: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(stream)); controller.close(); } }), { status: 200 }) } }, [model]);
@@ -66,6 +88,31 @@ describe('multi-provider normalization', () => {
     expect(result.usage.totalTokens).toBe(6);
   });
 
+  it('normalizes Anthropic tool-use blocks', async () => {
+    const anthropicModel = { ...model, id: 'anthropic-tools', provider: 'anthropic', model: 'claude-test' };
+    const provider = new AnthropicProvider({ apiKey: 'test', http: { request: async () => new Response(JSON.stringify({ content: [{ type: 'tool_use', id: 'tool_1', name: 'weather', input: { city: 'Paris' } }], usage: { input_tokens: 3, output_tokens: 2 }, stop_reason: 'tool_use' }), { status: 200 }) } }, [anthropicModel]);
+    const result = await provider.complete({ request: { requestId: 'req_a', messages: [{ role: 'user', content: 'weather' }] }, model: anthropicModel, signal: new AbortController().signal });
+    expect(result).toMatchObject({ finishReason: 'tool_calls', toolCalls: [{ id: 'tool_1', name: 'weather', arguments: { city: 'Paris' } }] });
+  });
+
+  it('normalizes fragmented Anthropic tool-use streams', async () => {
+    const anthropicModel = { ...model, id: 'anthropic-stream-tools', provider: 'anthropic', model: 'claude-test' };
+    const stream = [
+      'event: message_start\ndata: {"message":{"usage":{"input_tokens":3,"output_tokens":0}}}\n\n',
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"tool_use","id":"tool_1","name":"weather","input":{}}}\n\n',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"city\\":\\"Paris\\"}"}}\n\n',
+      'event: content_block_stop\ndata: {"index":0}\n\n',
+      'event: message_delta\ndata: {"usage":{"output_tokens":4}}\n\n',
+      'event: message_stop\ndata: {}\n\n',
+    ].join('');
+    const provider = new AnthropicProvider({ apiKey: 'test', http: { request: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(stream)); controller.close(); } }), { status: 200 }) } }, [anthropicModel]);
+    const chunks = [];
+    for await (const chunk of provider.stream({ request: { requestId: 'req_as', messages: [{ role: 'user', content: 'weather' }] }, model: anthropicModel, signal: new AbortController().signal })) chunks.push(chunk);
+    expect(chunks.map((chunk) => chunk.type)).toEqual(['tool-call-added', 'tool-call-arguments-delta', 'tool-call-done', 'completed']);
+    expect(chunks.at(-2)?.toolArguments).toEqual({ city: 'Paris' });
+    expect(chunks.at(-1)?.usage?.totalTokens).toBe(7);
+  });
+
   it('normalizes a Gemini Generate Content response', async () => {
     const geminiModel = { ...model, id: 'gemini-test', provider: 'gemini', model: 'gemini-test' };
     const provider = new GeminiProvider({ apiKey: 'test', http: { request: async (url, init) => {
@@ -77,5 +124,22 @@ describe('multi-provider normalization', () => {
     const result = await provider.complete({ request: { messages: [{ role: 'user', content: 'hi' }] }, model: geminiModel, signal: new AbortController().signal });
     expect(result.output).toBe('hello');
     expect(result.usage.totalTokens).toBe(5);
+  });
+
+  it('normalizes Gemini function calls with a stable synthetic ID', async () => {
+    const geminiModel = { ...model, id: 'gemini-tools', provider: 'gemini', model: 'gemini-test' };
+    const provider = new GeminiProvider({ apiKey: 'test', http: { request: async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'weather', args: { city: 'Paris' } } }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2 } }), { status: 200 }) } }, [geminiModel]);
+    const result = await provider.complete({ request: { requestId: 'req_g', messages: [{ role: 'user', content: 'weather' }] }, model: geminiModel, signal: new AbortController().signal });
+    expect(result).toMatchObject({ finishReason: 'tool_calls', toolCalls: [{ id: 'req_g:tool:0', name: 'weather', arguments: { city: 'Paris' } }] });
+  });
+
+  it('normalizes Gemini streamed function calls into canonical lifecycle events', async () => {
+    const geminiModel = { ...model, id: 'gemini-stream-tools', provider: 'gemini', model: 'gemini-test' };
+    const stream = 'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":{"city":"Paris"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}\n\n';
+    const provider = new GeminiProvider({ apiKey: 'test', http: { request: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(stream)); controller.close(); } }), { status: 200 }) } }, [geminiModel]);
+    const chunks = [];
+    for await (const chunk of provider.stream({ request: { requestId: 'req_gs', messages: [{ role: 'user', content: 'weather' }] }, model: geminiModel, signal: new AbortController().signal })) chunks.push(chunk);
+    expect(chunks.map((chunk) => chunk.type)).toEqual(['tool-call-added', 'tool-call-arguments-delta', 'tool-call-done', 'completed']);
+    expect(chunks.at(-2)).toMatchObject({ toolCallId: 'req_gs:tool:0', toolArguments: { city: 'Paris' } });
   });
 });

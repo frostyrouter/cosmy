@@ -28,6 +28,12 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
 export interface ResponseFormat {
   type: 'text' | 'json-schema';
   schema?: Record<string, unknown>;
@@ -201,9 +207,10 @@ export interface ResponseResult {
   model: string;
   provider: string;
   output: string;
+  toolCalls?: ToolCall[];
   usage: Usage;
   status: RouteStatus;
-  finishReason: 'stop' | 'length' | 'error' | 'cancelled';
+  finishReason: 'stop' | 'length' | 'tool_calls' | 'error' | 'cancelled';
   route: RouteDecision;
 }
 
@@ -212,6 +219,12 @@ export interface ResponseChunk {
   index: number;
   delta: string;
   done: boolean;
+  type?: 'text-delta' | 'tool-call-added' | 'tool-call-arguments-delta' | 'tool-call-done' | 'completed';
+  toolCallId?: string;
+  toolName?: string;
+  toolArguments?: Record<string, unknown>;
+  outputIndex?: number;
+  route?: RouteDecision;
   usage?: Usage;
 }
 

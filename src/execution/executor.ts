@@ -94,7 +94,7 @@ export class RequestExecutor {
         let emitted = false;
         try {
           for await (const chunk of this.streamCandidate({ requestId, route: attemptRoute, request, signal, fallbackIndex })) {
-            emitted = emitted || chunk.delta.length > 0;
+            emitted = emitted || !chunk.done;
             yield chunk;
           }
           return;
@@ -139,7 +139,7 @@ export class RequestExecutor {
       }
       this.metrics?.record({ requestId, model: route.selected.model.model, provider: provider.name, status: 'success', latencyMs, usage: response.usage, fallbackIndex });
       await this.recordRolloutOutcome(route.selected.model, 'success', latencyMs);
-      return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
+      return { requestId, model: route.selected.model.model, provider: provider.name, output: response.output, ...(response.toolCalls?.length ? { toolCalls: response.toolCalls } : {}), usage: response.usage, status: 'completed', finishReason: response.finishReason, route };
     } catch (error) {
       if (error instanceof OutputValidationError) throw error;
       const latencyMs = performance.now() - started;
@@ -159,6 +159,7 @@ export class RequestExecutor {
     const started = performance.now();
     let actualCostUsd = 0;
     let completed = false;
+    let routeAnnounced = false;
     const leaseController = new AbortController();
     const onRequestAbort = () => leaseController.abort();
     if (signal.aborted) leaseController.abort();
@@ -182,7 +183,8 @@ export class RequestExecutor {
     try {
       for await (const chunk of provider.stream({ request: { ...request, requestId }, model: route.selected.model, signal: leaseController.signal })) {
         if (heartbeatError) throw heartbeatError;
-        yield { ...chunk, requestId };
+        yield { ...chunk, requestId, ...(!routeAnnounced ? { route } : {}) };
+        routeAnnounced = true;
         if (chunk.done) {
           const latencyMs = performance.now() - started;
           this.health.markSuccess(route.selected.model.id, latencyMs);
