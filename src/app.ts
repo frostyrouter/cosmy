@@ -14,7 +14,7 @@ import { registerRoutes } from './api/http.js';
 import { registerAdminRoutes } from './api/admin-http.js';
 import { registerDiagnosticsRoute, registerMetricsRoute } from './api/metrics-http.js';
 import { InMemoryMetrics } from './observability/metrics.js';
-import { loadConfig, type AppConfig } from './config.js';
+import { resolveConfig, type AppConfigInput } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
 import type { RequestClassifier } from './ports/classifier.js';
 import type { BudgetAdministration, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
@@ -28,6 +28,7 @@ import { InMemoryControlPlaneStore } from './control-plane/memory-store.js';
 import { ControlPlaneService } from './control-plane/service.js';
 import { InMemoryRolloutRegistry, type RolloutOutcome } from './rollouts/rollout.js';
 import type { ControlPlaneStore } from './persistence/contracts.js';
+import { ShadowCoordinator } from './shadow/coordinator.js';
 
 export interface AppDependencies {
   registry?: ModelRegistry;
@@ -42,7 +43,9 @@ export interface AppDependencies {
   env?: NodeJS.ProcessEnv;
 }
 
-export async function buildApp(config: AppConfig = loadConfig(), dependencies: AppDependencies = {}): Promise<FastifyInstance> {
+export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: AppDependencies = {}): Promise<FastifyInstance> {
+  const configEnv = dependencies.env ?? (inputConfig.environment === 'test' ? {} : process.env);
+  const config = resolveConfig(inputConfig, configEnv);
   // Explicit test configuration must never inherit ambient credentials and make paid calls.
   const runtimeEnv = dependencies.env ?? (config.environment === 'test' ? {} : process.env);
   const availableClassifier = dependencies.classifier === undefined ? configuredClassifier(runtimeEnv) : dependencies.classifier ?? undefined;
@@ -63,6 +66,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   if (classifierMode === 'fail' && !availableClassifier) throw new Error('DEEPSEEK_API_KEY is required when CLASSIFIER_MODE=fail');
   let postgres: PostgresSqlClient | undefined;
   let rolloutPostgres: PostgresSqlClient | undefined;
+  let shadowPostgres: PostgresSqlClient | undefined;
   let registryRepository: PostgresRegistryRepository | undefined;
   let reservationRecovery: PostgresReservationRepository | undefined;
   let reservationHeartbeatMs = 30_000;
@@ -72,11 +76,13 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     try {
       await applyControlPlaneMigration(postgres);
       rolloutPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 100, queryTimeoutMs: 200, connectionTimeoutMs: 200 });
+      shadowPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 2_000, queryTimeoutMs: 3_000, connectionTimeoutMs: 500 });
     } catch (error) {
+      await rolloutPostgres?.close();
       await postgres.close();
       throw error;
     }
-    app.addHook('onClose', async () => { await rolloutPostgres?.close(); await postgres?.close(); });
+    app.addHook('onClose', async () => { await shadowPostgres?.close(); await rolloutPostgres?.close(); await postgres?.close(); });
   }
   const seedModels = [...defaultModels, ...configuredModelManifests(runtimeEnv)];
   let registry = dependencies.registry;
@@ -109,9 +115,11 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
   const providerAdapters = dependencies.providers ?? providers;
   const rolloutRegistry = new InMemoryRolloutRegistry();
   const controlStore: ControlPlaneStore | undefined = registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))
-    ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
+    ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres, shadowPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
     : undefined;
   if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
+  const shadowCoordinator = controlStore ? new ShadowCoordinator(controlStore, registry, providerAdapters, metrics, 4, 1_000, Math.min(config.requestTimeoutMs, 30_000)) : undefined;
+  if (shadowCoordinator && controlStore) shadowCoordinator.load(await controlStore.activeShadowCampaigns());
   const router = new DeterministicRouter(registry, {
     ...(classifier ? { classifier } : {}),
     classifierTimeoutMs: config.classifierTimeoutMs ?? 3_000,
@@ -136,7 +144,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     : undefined;
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics), readyCheck, authenticator);
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator), readyCheck, authenticator);
   registerDiagnosticsRoute(app, async () => {
     const current = (registry as { currentSnapshot?: () => { version: number; source: string; createdAt: string } }).currentSnapshot?.();
     const models = registry.snapshot();
@@ -149,7 +157,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
     };
   }, authenticator);
   if (controlStore && registry instanceof InMemoryModelRegistry) {
-    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name)), rolloutRegistry), authenticator);
+    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name)), rolloutRegistry, shadowCoordinator), authenticator);
   }
   if (registryRepository && registry instanceof InMemoryModelRegistry) {
     const refreshSeconds = config.registryRefreshSeconds ?? 15;
@@ -160,6 +168,7 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
         void repository.getCurrent().then(async (snapshot) => {
           if (snapshot && snapshot.version > durableRegistry.currentSnapshot().version) durableRegistry.load(snapshot);
           if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
+          if (controlStore && shadowCoordinator) shadowCoordinator.load(await controlStore.activeShadowCampaigns());
         }).catch((error: unknown) => { metrics.increment?.('registry_refresh_failure'); app.log.error({ err: error }, 'registry refresh failed'); });
       }, refreshSeconds * 1_000);
       timer.unref();
@@ -180,6 +189,11 @@ export async function buildApp(config: AppConfig = loadConfig(), dependencies: A
       timer.unref();
       app.addHook('onClose', async () => { clearInterval(timer); });
     }
+  }
+  if (controlStore) {
+    const recovered = await controlStore.reconcileExpiredShadows(); if (recovered > 0) metrics.increment?.('shadow_reservation_recovered', recovered);
+    const timer = setInterval(() => { void controlStore.reconcileExpiredShadows().then((count) => { if (count > 0) metrics.increment?.('shadow_reservation_recovered', count); }).catch(() => metrics.increment?.('shadow_execution_failure')); }, 30_000);
+    timer.unref(); app.addHook('onClose', async () => { clearInterval(timer); });
   }
   return app;
 }

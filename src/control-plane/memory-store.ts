@@ -6,6 +6,7 @@ import { nowIso } from '../util/ids.js';
 import type { ModelPromotionEvidence } from './promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import { RouterError } from '../domain/errors.js';
+import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
 
 const maximumEvidenceVersions = 10_000;
 const maximumEvidenceRecordsPerVersion = 20;
@@ -14,6 +15,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly audit: AuditEvent[] = [];
   private readonly evidence = new Map<string, ModelPromotionEvidence[]>();
   private readonly rollouts = new Map<string, ModelRollout>();
+  private readonly shadowCampaigns = new Map<string, ShadowCampaign>();
+  private readonly shadowReservations = new Map<string, { reservation: ShadowReservation; createdAtMs: number; reconciled: boolean }>();
 
   constructor(private readonly registry: VersionedModelRegistry, private readonly budgets: BudgetAdministration) {}
 
@@ -92,6 +95,61 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
     }
     return structuredClone(rollout);
+  }
+
+  async createShadowCampaign(input: Omit<ShadowCampaign, 'id' | 'state' | 'reservedUsd' | 'spentUsd' | 'sampleCount' | 'successCount' | 'errorCount' | 'createdAt' | 'updatedAt'> & { actorCredentialId: string; actorTenantId: string }): Promise<ShadowCampaign> {
+    if ([...this.shadowCampaigns.values()].filter((campaign) => campaign.state === 'active').length >= 64) throw new RouterError('The active shadow campaign limit has been reached', 'shadow_campaign_limit', 409, false);
+    if ([...this.shadowCampaigns.values()].some((campaign) => campaign.modelId === input.modelId && campaign.state === 'active')) throw new RouterError('An active shadow campaign already exists for this model', 'shadow_campaign_conflict', 409, false);
+    const now = nowIso();
+    const campaign: ShadowCampaign = { id: randomUUID(), modelId: input.modelId, modelVersion: input.modelVersion, state: 'active', samplePercentage: input.samplePercentage, budgetLimitUsd: input.budgetLimitUsd, reservedUsd: 0, spentUsd: 0, allowedDataClasses: [...input.allowedDataClasses], sampleCount: 0, successCount: 0, errorCount: 0, createdAt: now, updatedAt: now };
+    this.shadowCampaigns.set(campaign.id, campaign);
+    this.record(input.actorCredentialId, input.actorTenantId, 'shadow.start', `shadow:${campaign.id}`, { modelId: campaign.modelId, modelVersion: campaign.modelVersion, samplePercentage: campaign.samplePercentage, budgetLimitUsd: campaign.budgetLimitUsd });
+    return structuredClone(campaign);
+  }
+
+  async shadowCampaign(id: string): Promise<ShadowCampaign | undefined> { const campaign = this.shadowCampaigns.get(id); return campaign ? structuredClone(campaign) : undefined; }
+  async activeShadowCampaigns(): Promise<readonly ShadowCampaign[]> { return [...this.shadowCampaigns.values()].filter((campaign) => campaign.state === 'active').map((campaign) => structuredClone(campaign)); }
+
+  async changeShadowCampaign(input: { id: string; action: 'pause' | 'resume' | 'complete'; actorCredentialId: string; actorTenantId: string }): Promise<ShadowCampaign> {
+    const campaign = this.shadowCampaigns.get(input.id); if (!campaign) throw new RouterError('Shadow campaign was not found', 'shadow_campaign_not_found', 404, false);
+    const valid = (input.action === 'pause' && campaign.state === 'active') || (input.action === 'resume' && campaign.state === 'paused') || (input.action === 'complete' && campaign.state !== 'completed');
+    if (!valid) throw new RouterError('Shadow campaign action is invalid for its current state', 'shadow_campaign_state_conflict', 409, false);
+    if (input.action === 'resume' && [...this.shadowCampaigns.values()].some((entry) => entry.id !== campaign.id && entry.modelId === campaign.modelId && entry.state === 'active')) throw new RouterError('An active shadow campaign already exists for this model', 'shadow_campaign_conflict', 409, false);
+    if (input.action === 'resume' && [...this.shadowCampaigns.values()].filter((entry) => entry.state === 'active').length >= 64) throw new RouterError('The active shadow campaign limit has been reached', 'shadow_campaign_limit', 409, false);
+    campaign.state = input.action === 'pause' ? 'paused' : input.action === 'resume' ? 'active' : 'completed'; campaign.updatedAt = nowIso();
+    this.record(input.actorCredentialId, input.actorTenantId, `shadow.${input.action}`, `shadow:${campaign.id}`, {});
+    return structuredClone(campaign);
+  }
+
+  async reserveShadow(campaignId: string, estimatedCostUsd: number): Promise<ShadowReservation> {
+    if (!Number.isFinite(estimatedCostUsd) || estimatedCostUsd < 0) throw new Error('Shadow estimate must be non-negative');
+    const campaign = this.shadowCampaigns.get(campaignId);
+    if (!campaign || campaign.state !== 'active') throw new RouterError('Shadow campaign is not active', 'shadow_campaign_inactive', 409, false);
+    if (campaign.spentUsd + campaign.reservedUsd + estimatedCostUsd > campaign.budgetLimitUsd) throw new RouterError('Shadow campaign budget would be exceeded', 'shadow_budget_exceeded', 409, false);
+    const reservation = { id: randomUUID(), campaignId, estimatedCostUsd };
+    campaign.reservedUsd += reservation.estimatedCostUsd; campaign.updatedAt = nowIso();
+    this.shadowReservations.set(reservation.id, { reservation, createdAtMs: Date.now(), reconciled: false }); return structuredClone(reservation);
+  }
+
+  async reconcileShadow(reservation: ShadowReservation, actualCostUsd: number): Promise<void> {
+    const stored = this.shadowReservations.get(reservation.id); if (!stored || stored.reconciled) return;
+    stored.reconciled = true; const campaign = this.shadowCampaigns.get(reservation.campaignId); if (!campaign) return;
+    campaign.reservedUsd = Math.max(0, campaign.reservedUsd - stored.reservation.estimatedCostUsd); campaign.spentUsd += Math.max(0, actualCostUsd); campaign.updatedAt = nowIso();
+    if (campaign.spentUsd >= campaign.budgetLimitUsd) campaign.state = 'completed';
+  }
+
+  async recordShadowObservation(observation: ShadowObservation): Promise<void> {
+    const campaign = this.shadowCampaigns.get(observation.campaignId); if (!campaign) return;
+    campaign.sampleCount += 1; campaign.successCount += observation.status === 'success' ? 1 : 0; campaign.errorCount += observation.status === 'error' ? 1 : 0; campaign.updatedAt = nowIso();
+  }
+
+  async reconcileExpiredShadows(limit = 100): Promise<number> {
+    let count = 0;
+    for (const stored of this.shadowReservations.values()) {
+      if (count >= limit || stored.reconciled || Date.now() - stored.createdAtMs < 300_000) continue;
+      await this.reconcileShadow(stored.reservation, stored.reservation.estimatedCostUsd); count += 1;
+    }
+    return count;
   }
 
   private record(actorCredentialId: string, actorTenantId: string, action: AuditEvent['action'], target: string, details: Record<string, unknown>): void {

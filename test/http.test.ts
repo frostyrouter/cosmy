@@ -23,6 +23,13 @@ describe('HTTP API', () => {
     expect(body.usage.totalTokens).toBe(body.usage.inputTokens + body.usage.outputTokens);
   });
 
+  it('resolves timeout and retry defaults for partial programmatic configuration', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'hello with defaults' }] } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: 'completed', provider: 'simulator' });
+  });
+
   it('does not treat a normally completed HTTP request as cancelled', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     await app.listen({ host: '127.0.0.1', port: 0 });

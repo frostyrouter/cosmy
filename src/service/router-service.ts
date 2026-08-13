@@ -6,6 +6,7 @@ import { RequestExecutor } from '../execution/executor.js';
 import { RouterError } from '../domain/errors.js';
 import type { IdempotencyClaim, IdempotencyStore, ResponseCache } from '../persistence/contracts.js';
 import type { MetricsSink } from '../observability/metrics.js';
+import type { ShadowScheduler } from '../shadow/coordinator.js';
 
 function cacheKey(request: ResponseRequest, policyVersion: string | undefined, registryVersion: number | undefined, modelId: string, modelVersion: string): string {
   const normalized = { ...request, requestId: undefined, stream: false };
@@ -45,6 +46,7 @@ export class RouterService {
     private readonly idempotency?: IdempotencyStore,
     private readonly idempotencyTtlSeconds = 86_400,
     private readonly metrics?: MetricsSink,
+    private readonly shadows?: ShadowScheduler,
   ) {}
 
   async complete(request: ResponseRequest, signal: AbortSignal, idempotencyKey?: string): Promise<ResponseResult> {
@@ -82,7 +84,9 @@ export class RouterService {
     const id = request.requestId ?? requestId();
     const route = await this.router.decideAsync(id, request, signal);
     const cache = this.cache;
-    if (!cache || this.cacheTtlSeconds <= 0 || !cacheEligible(request)) return this.executor.execute({ requestId: id, route, request, signal });
+    if (!cache || this.cacheTtlSeconds <= 0 || !cacheEligible(request)) {
+      const result = await this.executor.execute({ requestId: id, route, request, signal }); this.scheduleShadow(request, result); return result;
+    }
     const key = cacheKey(request, this.router.policyVersion, this.getRegistryVersion?.(), route.selected.model.id, route.selected.model.version);
     try {
       const cached = await cache.get(key);
@@ -93,6 +97,7 @@ export class RouterService {
       }
     } catch { this.metrics?.increment?.('cache_failure'); }
     const result = await this.executor.execute({ requestId: id, route, request, signal });
+    this.scheduleShadow(request, result);
     try { await cache.set(key, JSON.stringify(result), this.cacheTtlSeconds); } catch { this.metrics?.increment?.('cache_failure'); }
     return result;
   }
@@ -101,5 +106,10 @@ export class RouterService {
     const id = request.requestId ?? requestId();
     const route = await this.router.decideAsync(id, request, signal);
     for await (const chunk of this.executor.stream({ requestId: id, route, request, signal })) yield chunk;
+  }
+
+  private scheduleShadow(request: ResponseRequest, result: ResponseResult): void {
+    if (!this.shadows) return;
+    setImmediate(() => { try { this.shadows?.enqueue(request, result); } catch { this.metrics?.increment?.('shadow_execution_failure'); } });
   }
 }

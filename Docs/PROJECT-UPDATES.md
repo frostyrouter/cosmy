@@ -2,6 +2,23 @@
 
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
 
+## 2026-08-12 - Configuration and rollout contention hardening (PR #12 follow-up)
+
+- Change: Added one validated configuration-resolution boundary so partial programmatic configuration receives the same timeout, retry, persistence, cache, authentication, and classifier defaults as environment-based startup. Explicit test configuration remains isolated from ambient provider credentials.
+- Reliability: PostgreSQL canary observations now retry only server-confirmed lock and statement cancellations with bounded jitter. Every retry starts a fresh transaction, so a timed-out statement cannot partially count an outcome or duplicate the automatic-rollback audit event.
+- Developer impact: `npm test` is cross-platform and the latency benchmark has a first-class compiled `npm run bench` command; the benchmark now exercises resolved defaults instead of aborting immediately on an undefined provider timeout and does not depend on a TypeScript runtime loader.
+- Files: Configuration/application bootstrap, PostgreSQL control-plane adapter, package scripts, unit/HTTP persistence regressions, and rollout operations documentation.
+- Validation: TypeScript lint, unit/HTTP suite, production build, benchmark smoke, and PostgreSQL Compose integration are required before the follow-up is considered complete.
+- Boundary: Retry protects short transient row contention; persistent database saturation still increments `rollout_observation_failure` and never replaces the already completed provider response. Stage-level production load evidence remains follow-up work.
+
+## 2026-08-10 - Safe shadow evaluation
+
+- Change: Added audited shadow campaigns with stable sampling, bounded asynchronous execution, lifecycle APIs, separate atomic budgets, crash-recoverable reservations, and hash-only observations.
+- Privacy: Streams, tools, tool messages, confidential/restricted data, cache hits, and idempotency replays are excluded. Provider requests strip tenant IDs, metadata, routing hints, and model overrides; durable storage contains no prompts or outputs and uses process-keyed HMAC fingerprints.
+- Isolation: Four workers and a 1,000-job bound protect memory; shadow SQL uses a dedicated four-connection pool, and every failure remains outside the primary response path.
+- Validation: Policy/coordinator/API tests, full build and unit suite, managed migration checks, concurrent PostgreSQL budget admission, lease recovery, and Docker smoke.
+- Boundary: Exact match is distribution evidence, not semantic quality. A privacy-approved signed evaluator pipeline remains required before shadow results can prove answer quality.
+
 ## 2026-08-10 - Controlled canary rollouts
 
 - Change: Added durable canary state, tenant-stable percentage assignment before ranking, explicit-model enforcement, manual promotion/rollback, and route-versioned cache keys.

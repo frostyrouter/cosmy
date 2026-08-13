@@ -24,6 +24,8 @@ export interface AppConfig {
   classifierTimeoutMs?: number;
 }
 
+export type AppConfigInput = Partial<AppConfig>;
+
 function numberEnv(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -46,6 +48,21 @@ function nonNegativeIntegerEnv(value: string | undefined, fallback: number): num
   const parsed = numberEnv(value, fallback);
   if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`Expected a non-negative integer, received '${value}'`);
   return parsed;
+}
+
+function validateConfig(config: AppConfig): AppConfig {
+  if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65_535) throw new Error(`Expected port between 0 and 65535, received '${config.port}'`);
+  if (!Number.isFinite(config.requestTimeoutMs) || config.requestTimeoutMs <= 0) throw new Error(`Expected a positive request timeout, received '${config.requestTimeoutMs}'`);
+  if (!Number.isInteger(config.providerMaxRetries) || config.providerMaxRetries < 0) throw new Error(`Expected non-negative provider retries, received '${config.providerMaxRetries}'`);
+  if (config.responseCacheTtlSeconds !== undefined && (!Number.isInteger(config.responseCacheTtlSeconds) || config.responseCacheTtlSeconds < 0)) throw new Error(`Expected a non-negative cache TTL, received '${config.responseCacheTtlSeconds}'`);
+  if (config.rateLimitMax !== undefined && (!Number.isInteger(config.rateLimitMax) || config.rateLimitMax < 0)) throw new Error(`Expected a non-negative rate limit, received '${config.rateLimitMax}'`);
+  if (config.tenantBudgetUsd !== undefined && (!Number.isFinite(config.tenantBudgetUsd) || config.tenantBudgetUsd <= 0)) throw new Error(`Expected a positive tenant budget, received '${config.tenantBudgetUsd}'`);
+  if (config.idempotencyTtlSeconds !== undefined && (!Number.isInteger(config.idempotencyTtlSeconds) || config.idempotencyTtlSeconds <= 0)) throw new Error(`Expected a positive idempotency TTL, received '${config.idempotencyTtlSeconds}'`);
+  if (config.reservationLeaseSeconds !== undefined && (!Number.isInteger(config.reservationLeaseSeconds) || config.reservationLeaseSeconds <= 0)) throw new Error(`Expected a positive reservation lease, received '${config.reservationLeaseSeconds}'`);
+  if (config.reconciliationSweepSeconds !== undefined && (!Number.isInteger(config.reconciliationSweepSeconds) || config.reconciliationSweepSeconds < 0)) throw new Error(`Expected a non-negative reconciliation interval, received '${config.reconciliationSweepSeconds}'`);
+  if (config.registryRefreshSeconds !== undefined && (!Number.isInteger(config.registryRefreshSeconds) || config.registryRefreshSeconds < 0)) throw new Error(`Expected a non-negative registry refresh interval, received '${config.registryRefreshSeconds}'`);
+  if (config.classifierTimeoutMs !== undefined && (!Number.isFinite(config.classifierTimeoutMs) || config.classifierTimeoutMs <= 0)) throw new Error(`Expected a positive classifier timeout, received '${config.classifierTimeoutMs}'`);
+  return config;
 }
 
 function booleanEnv(value: string | undefined, fallback: boolean): boolean {
@@ -86,7 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   const defaultClassifierMode = environment === 'production' ? 'fail' : env.DEEPSEEK_API_KEY ? 'degrade' : 'disabled';
   const classifierMode = (configuredClassifierMode ?? defaultClassifierMode) as NonNullable<AppConfig['classifierMode']>;
-  return {
+  return validateConfig({
     host: env.HOST ?? '0.0.0.0',
     port: numberEnv(env.PORT, 8080),
     logLevel: env.LOG_LEVEL ?? 'info',
@@ -108,5 +125,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     registryRefreshSeconds: nonNegativeIntegerEnv(env.REGISTRY_REFRESH_SECONDS, 15),
     classifierMode,
     classifierTimeoutMs: numberEnv(env.CLASSIFIER_TIMEOUT_MS, 3_000),
-  };
+  });
+}
+
+/** Applies environment-aware defaults to programmatic partial configuration. */
+export function resolveConfig(input: AppConfigInput = {}, env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const environment = input.environment ?? env.ROUTER_ENV ?? 'development';
+  const defaults = loadConfig({ ...env, ROUTER_ENV: environment });
+  const defined = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as AppConfigInput;
+  return validateConfig({ ...defaults, ...defined });
 }

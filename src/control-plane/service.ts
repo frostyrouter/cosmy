@@ -5,9 +5,11 @@ import type { InMemoryModelRegistry } from '../registry/memory-registry.js';
 import type { RequestPrincipal } from '../security/auth.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from './promotion.js';
 import type { InMemoryRolloutRegistry, ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
+import type { ShadowCampaign } from '../shadow/shadow.js';
+import type { ShadowCoordinator } from '../shadow/coordinator.js';
 
 export class ControlPlaneService {
-  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry) {}
+  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator) {}
 
   snapshot() { return this.registry.currentSnapshot(); }
 
@@ -76,5 +78,18 @@ export class ControlPlaneService {
     const rollout = await this.store.recordRolloutOutcome(outcome);
     if (rollout) this.rollouts?.upsert(rollout);
     return before?.state === 'canary' && rollout?.state === 'rolled_back' ? rollout : undefined;
+  }
+
+  async createShadowCampaign(input: Omit<ShadowCampaign, 'id' | 'state' | 'reservedUsd' | 'spentUsd' | 'sampleCount' | 'successCount' | 'errorCount' | 'createdAt' | 'updatedAt'>, actor: RequestPrincipal) {
+    const model = this.registry.get(input.modelId);
+    if (!model || model.version !== input.modelVersion || !this.availableProviders.has(model.provider)) throw new RouterError('Shadow target must be an exact registered model version with an available provider', 'invalid_shadow_target', 409, false);
+    if (input.allowedDataClasses.some((value) => value !== 'public' && value !== 'internal')) throw new RouterError('Shadow campaigns may only admit public or internal data', 'invalid_shadow_data_class', 400, false);
+    const campaign = await this.store.createShadowCampaign({ ...input, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    this.shadows?.load(await this.store.activeShadowCampaigns()); return campaign;
+  }
+  shadowCampaign(id: string) { return this.store.shadowCampaign(id); }
+  async changeShadowCampaign(id: string, action: 'pause' | 'resume' | 'complete', actor: RequestPrincipal) {
+    const campaign = await this.store.changeShadowCampaign({ id, action, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    this.shadows?.load(await this.store.activeShadowCampaigns()); return campaign;
   }
 }
