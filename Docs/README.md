@@ -33,6 +33,20 @@ The documentation deliberately separates product intent from implementation deta
 - [Model promotion gates](25-model-promotion-gates.md)
 - [Controlled canary rollouts](26-controlled-rollouts.md)
 - [Safe shadow evaluation](27-safe-shadow-evaluation.md)
+- [Routing query APIs and durable decisions](28-routing-query-apis.md)
+- [Live health and output validation](29-live-health-and-output-validation.md)
+- [Normalized tools and streaming events](30-normalized-tools-and-events.md)
+- [Tool-result continuations](31-tool-result-continuations.md)
+- [End-to-end deadlines](32-end-to-end-deadlines.md)
+- [Shared provider health](33-shared-provider-health.md)
+- [Complete decision evidence](34-complete-decision-evidence.md)
+- [Durable credential lifecycle](35-durable-credential-lifecycle.md)
+- [Atomic registry rollback](36-atomic-registry-rollback.md)
+- [Emergency model disable](37-emergency-model-disable.md)
+- [Durable tenant policy bundles](38-durable-tenant-policy-bundles.md)
+- [Cached OIDC workload identity](39-oidc-workload-identity.md)
+- [Provider bulkheads and load shedding](40-provider-bulkheads.md)
+- [Tamper-evident administrative audit](41-tamper-evident-audit.md)
 
 ## Decision status vocabulary
 

@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { defaultModels } from '../src/registry/default-models.js';
-import { sha256ApiKey } from '../src/security/auth.js';
+import { ReloadableApiKeyAuthenticator, sha256ApiKey } from '../src/security/auth.js';
+import type { CredentialStore, ManagedApiCredential } from '../src/persistence/contracts.js';
 import { InMemoryUsageLedger } from '../src/stores/memory-usage-ledger.js';
 
 const adminKey = 'admin-secret';
 const responseKey = 'response-secret';
 const credentials = [
   { id: 'admin', tenantId: 'platform', keySha256: sha256ApiKey(adminKey), scopes: ['admin:write' as const] },
-  { id: 'caller', tenantId: 'tenant-a', keySha256: sha256ApiKey(responseKey), scopes: ['responses:create' as const] },
+  { id: 'caller', tenantId: 'tenant-a', keySha256: sha256ApiKey(responseKey), scopes: ['responses:create' as const, 'routing:read' as const] },
 ];
 const config = { host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' as const, requestTimeoutMs: 60_000, providerMaxRetries: 0, apiCredentials: credentials };
 
@@ -30,6 +31,37 @@ describe('administrative HTTP API', () => {
     expect(diagnostics.json()).toMatchObject({ status: 'ready', persistence: 'memory', registry: { modelCount: 3, enabledModelCount: 3 } });
   });
 
+  it('creates and disables a redacted credential without restarting', async () => {
+    const stored: ManagedApiCredential[] = [];
+    const credentialStore: CredentialStore = {
+      listCredentials: async () => structuredClone(stored),
+      createCredential: async (input) => {
+        const now = new Date().toISOString();
+        const created = { id: input.id, tenantId: input.tenantId, keySha256: input.keySha256, scopes: [...input.scopes], createdAt: now, updatedAt: now };
+        stored.push(created); return structuredClone(created);
+      },
+      disableCredential: async (input) => {
+        const found = stored.find((entry) => entry.id === input.id)!; found.disabled = true; found.updatedAt = new Date().toISOString(); return structuredClone(found);
+      },
+    };
+    const authenticator = new ReloadableApiKeyAuthenticator(credentials);
+    app = await buildApp(config, { authenticator, credentials: credentialStore });
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const created = await app.inject({ method: 'POST', url: '/v1/admin/credentials', headers, payload: { id: 'rotated-caller', tenantId: 'tenant-b', keySha256: sha256ApiKey('rotated-secret'), scopes: ['responses:create'] } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ id: 'rotated-caller', tenantId: 'tenant-b', scopes: ['responses:create'] });
+    expect(created.body).not.toContain(sha256ApiKey('rotated-secret'));
+    const accepted = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer rotated-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(accepted.statusCode).toBe(200);
+    const listed = await app.inject({ method: 'GET', url: '/v1/admin/credentials', headers });
+    expect(listed.body).not.toContain(sha256ApiKey('rotated-secret'));
+    const disabled = await app.inject({ method: 'POST', url: '/v1/admin/credentials/rotated-caller/disable', headers });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json()).toMatchObject({ id: 'rotated-caller', disabled: true });
+    const rejected = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer rotated-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(rejected.statusCode).toBe(401);
+  });
+
   it('publishes validated model snapshots and records an audit event', async () => {
     app = await buildApp(config);
     const headers = { authorization: `Bearer ${adminKey}` };
@@ -38,6 +70,82 @@ describe('administrative HTTP API', () => {
     expect(publish.json()).toMatchObject({ source: 'operator:test', models: [{ id: defaultModels[0]!.id }] });
     const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers });
     expect(audit.json().events[0]).toMatchObject({ actorCredentialId: 'admin', action: 'models.publish', details: { modelCount: 1 } });
+  });
+
+  it('atomically rolls back to a durable registry version with optimistic concurrency', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const initial = await app.inject({ method: 'GET', url: '/v1/admin/models', headers });
+    const targetVersion = initial.json().version as number;
+    const published = await app.inject({ method: 'PUT', url: '/v1/admin/models', headers, payload: { source: 'reduced-registry', models: [defaultModels[0]] } });
+    const currentVersion = published.json().version as number;
+    const missingPrecondition = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers, payload: { targetVersion, reason: 'restore full registry' } });
+    expect(missingPrecondition.statusCode).toBe(428);
+    const malformedPrecondition = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers: { ...headers, 'if-match': `"${currentVersion}` }, payload: { targetVersion, reason: 'restore full registry' } });
+    expect(malformedPrecondition.statusCode).toBe(428);
+    const rolledBack = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers: { ...headers, 'if-match': `"${currentVersion}"` }, payload: { targetVersion, reason: 'restore full registry' } });
+    expect(rolledBack.statusCode).toBe(200);
+    expect(rolledBack.json()).toMatchObject({ version: currentVersion + 1, source: `rollback:${targetVersion}` });
+    expect(rolledBack.json().models).toHaveLength(defaultModels.length);
+    const staleRetry = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers: { ...headers, 'if-match': `${currentVersion}` }, payload: { targetVersion, reason: 'retry after lost response' } });
+    expect(staleRetry.statusCode).toBe(409);
+    expect(staleRetry.json().error.code).toBe('registry_version_conflict');
+    const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers });
+    expect(audit.json().events).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'models.rollback', details: expect.objectContaining({ targetVersion, previousVersion: currentVersion, reason: 'restore full registry' }) })]));
+  });
+
+  it('emergency-disables a model without permitting stale commands or disabling the last model', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const disable = (modelId: string, version: number, reason: string) => app!.inject({ method: 'POST', url: '/v1/admin/models/disable', headers: { ...headers, 'if-match': `${version}` }, payload: { modelId, reason } });
+    const first = await disable(defaultModels[0]!.id, 1, 'elevated provider errors');
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ version: 2, source: `disable:${defaultModels[0]!.id}` });
+    expect(first.json().models.find((model: { id: string }) => model.id === defaultModels[0]!.id).enabled).toBe(false);
+    const idempotent = await disable(defaultModels[0]!.id, 2, 'duplicate command');
+    expect(idempotent.json().version).toBe(2);
+    const stale = await disable(defaultModels[1]!.id, 1, 'stale operator view');
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe('registry_version_conflict');
+    const second = await disable(defaultModels[1]!.id, 2, 'continued incident');
+    expect(second.json().version).toBe(3);
+    const last = await disable(defaultModels[2]!.id, 3, 'unsafe command');
+    expect(last.statusCode).toBe(409);
+    expect(last.json().error.code).toBe('last_enabled_model');
+    const routed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { model: defaultModels[0]!.id, messages: [{ role: 'user', content: 'must not run on disabled model' }] } });
+    expect(routed.statusCode).toBe(422);
+    expect(routed.json().error.code).toBe('no_eligible_model');
+    const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers });
+    expect(audit.json().events.filter((event: { action: string }) => event.action === 'models.disable')).toHaveLength(2);
+  });
+
+  it('pages through the complete audit history with an opaque stable cursor', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    for (let index = 0; index < 5; index += 1) {
+      const mutation = await app.inject({ method: 'PUT', url: `/v1/admin/tenants/audit-${index}/budget`, headers, payload: { limitUsd: index + 1 } });
+      expect(mutation.statusCode).toBe(200);
+    }
+    const first = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=2', headers });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().events).toHaveLength(2);
+    expect(first.json().nextCursor).toEqual(expect.any(String));
+    const second = await app.inject({ method: 'GET', url: `/v1/admin/audit?limit=2&cursor=${first.json().nextCursor}`, headers });
+    const third = await app.inject({ method: 'GET', url: `/v1/admin/audit?limit=2&cursor=${second.json().nextCursor}`, headers });
+    const all = [...first.json().events, ...second.json().events, ...third.json().events];
+    expect(new Set(all.map((event: { id: string }) => event.id)).size).toBe(5);
+    expect(third.json()).toMatchObject({ nextCursor: null });
+    const malformed = await app.inject({ method: 'GET', url: '/v1/admin/audit?cursor=not%2Bbase64', headers });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json().error.code).toBe('invalid_request');
+  });
+
+  it('reports the administrative audit-chain verification state', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const verification = await app.inject({ method: 'GET', url: '/v1/admin/audit/verify', headers });
+    expect(verification.statusCode).toBe(200);
+    expect(verification.json()).toMatchObject({ valid: true, checkedEvents: 0, headSequence: null, headHash: null });
   });
 
   it('sets a tenant budget that is enforced on the response path', async () => {
@@ -51,6 +159,34 @@ describe('administrative HTTP API', () => {
     expect(blocked.json().error.code).toBe('budget_exceeded');
     const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit', headers: adminHeaders });
     expect(audit.json().events[0]).toMatchObject({ action: 'budget.set', target: 'tenant:tenant-a' });
+  });
+
+  it('creates a versioned tenant policy that callers can tighten but never relax', async () => {
+    app = await buildApp(config);
+    const adminHeaders = { authorization: `Bearer ${adminKey}`, 'if-match': '0', 'x-change-reason': 'establish tenant boundary' };
+    const missingReason = await app.inject({ method: 'PUT', url: '/v1/admin/tenants/tenant-a/policy', headers: { authorization: `Bearer ${adminKey}`, 'if-match': '0' }, payload: { allowedModels: [defaultModels[0]!.id] } });
+    expect(missingReason.statusCode).toBe(428);
+    const created = await app.inject({ method: 'PUT', url: '/v1/admin/tenants/tenant-a/policy', headers: adminHeaders, payload: { allowedModels: [defaultModels[0]!.id], allowedDataClasses: ['public', 'internal'], maxCostUsd: 1, allowFallback: false } });
+    expect(created.statusCode).toBe(200);
+    expect(created.json()).toMatchObject({ tenantId: 'tenant-a', version: 1, allowedModels: [defaultModels[0]!.id], allowFallback: false });
+    const stale = await app.inject({ method: 'PUT', url: '/v1/admin/tenants/tenant-a/policy', headers: adminHeaders, payload: { allowedModels: [defaultModels[1]!.id] } });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe('policy_version_conflict');
+    const read = await app.inject({ method: 'GET', url: '/v1/admin/tenants/tenant-a/policy', headers: { authorization: `Bearer ${adminKey}` } });
+    expect(read.json()).toMatchObject({ version: 1, allowedModels: [defaultModels[0]!.id] });
+    const models = await app.inject({ method: 'GET', url: '/v1/models', headers: { authorization: `Bearer ${responseKey}` } });
+    expect(models.json().data.map((model: { id: string }) => model.id)).toEqual([defaultModels[0]!.id]);
+    const allowed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { model: defaultModels[0]!.id, messages: [{ role: 'user', content: 'allowed request' }] } });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.json().route.policyVersion).toContain('tenant-1');
+    const relaxed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { model: defaultModels[1]!.id, messages: [{ role: 'user', content: 'cannot relax allowlist' }], policy: { allowedModels: [defaultModels[1]!.id] } } });
+    expect(relaxed.statusCode).toBe(422);
+    expect(relaxed.json().error.code).toBe('no_eligible_model');
+    const dataClass = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { messages: [{ role: 'user', content: 'restricted request' }], policy: { dataClass: 'restricted' } } });
+    expect(dataClass.statusCode).toBe(422);
+    expect(dataClass.json().error.code).toBe('policy_rejection');
+    const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers: { authorization: `Bearer ${adminKey}` } });
+    expect(audit.json().events).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'policy.set', target: 'tenant:tenant-a', details: { version: 1, reason: 'establish tenant boundary' } })]));
   });
 
   it('returns 409 when a memory limit is below current usage', async () => {

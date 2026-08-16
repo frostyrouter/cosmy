@@ -1,12 +1,13 @@
 # Tenant security quick guide
 
-Status: implemented foundation.
+Status: implemented for static bootstrap keys, durable PostgreSQL credential rotation/revocation, and cached OIDC JWT workload identity.
 
 ## What is guaranteed
 
 | Boundary | Behavior |
 |---|---|
 | API keys | Runtime configuration stores SHA-256 digests, not plaintext tenant keys. |
+| OIDC tokens | Exact issuer/audience, pinned asymmetric algorithms, signature, subject, expiry, issued-at time, tenant claim, and optional token type are verified locally against a bounded cached JWKS. |
 | Tenant identity | `/v1/responses` derives the billing tenant from the authenticated credential. |
 | Caller overrides | A different `policy.tenantId` is rejected with HTTP 403. |
 | Authorization | Response callers need `responses:create`; operators use separate `admin:read` or `admin:write` credentials. |
@@ -31,7 +32,7 @@ Status: implemented foundation.
 ]
 ```
 
-The client sends `Authorization: Bearer <plaintext-key>`. Disable a key by adding `"disabled": true` and restarting the current static configuration. The legacy `COSMY_API_KEY` variable remains available for migration and maps to tenant `default`; new deployments should not use it.
+The client sends `Authorization: Bearer <plaintext-key>`. Static bootstrap credentials still require configuration restart, but PostgreSQL-backed credentials can be created and disabled through the audited admin API without restarting routers. Only SHA-256 digests cross the admin boundary or enter PostgreSQL; operators must generate high-entropy plaintext keys outside Cosmy and deliver them through an approved secret channel. The legacy `COSMY_API_KEY` variable remains available for migration and maps to tenant `default`; new deployments should not use it.
 
 ## Safe rollout
 
@@ -46,6 +47,6 @@ The client sends `Authorization: Bearer <plaintext-key>`. Disable a key by addin
 
 Do not add admin scopes to ordinary application credentials. `admin:write` can publish the full model registry and change tenant limits; it implies `admin:read`. Duplicate enabled key digests fail startup so one bearer key can never resolve to two tenant identities. See [Control-plane operations](23-control-plane-operations.md).
 
-## Next security milestone
+## Workload identity
 
-Static credentials are the safe bootstrap path, not the final identity plane. Planned work adds durable hashed project keys, rotation without restart, OAuth/workload identity, and immediate revocation. Administrative mutations are already scope-controlled and durably audited.
+Static credentials remain the bootstrap path. Durable hashed project keys and bounded cross-instance revocation are described in [durable credential lifecycle](35-durable-credential-lifecycle.md). For short-lived service identity, configure the OIDC issuer, audience, and JWKS URI together and map only provider-managed claims. Key retrieval happens at startup and in the background, never on the known-key request path. See [cached OIDC workload identity](39-oidc-workload-identity.md).

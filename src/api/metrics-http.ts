@@ -11,7 +11,7 @@ export interface OperationalDiagnostics {
 
 export function registerMetricsRoute(app: FastifyInstance, metrics: MetricsSink, authenticator?: RequestAuthenticator): void {
   app.get('/metrics', { config: { rateLimit: false } }, async (request, reply) => {
-    const principal = authenticator?.authenticate(request.headers.authorization);
+    const principal = await authenticator?.authenticate(request.headers.authorization);
     if (!principal) return reply.code(401).send({ error: { code: 'authentication_error', message: 'Missing or invalid API key' } });
     if (!principal.scopes.some((scope) => scope === 'metrics:read' || scope === 'admin:read' || scope === 'admin:write')) {
       return reply.code(403).send({ error: { code: 'authorization_error', message: "Credential requires 'metrics:read' scope" } });
@@ -23,7 +23,7 @@ export function registerMetricsRoute(app: FastifyInstance, metrics: MetricsSink,
 
 export function registerDiagnosticsRoute(app: FastifyInstance, diagnostics: () => Promise<OperationalDiagnostics>, authenticator?: RequestAuthenticator): void {
   app.get('/v1/admin/diagnostics', { config: { rateLimit: false } }, async (request, reply) => {
-    const principal = authenticator?.authenticate(request.headers.authorization);
+    const principal = await authenticator?.authenticate(request.headers.authorization);
     if (!principal) return reply.code(401).send({ error: { code: 'authentication_error', message: 'Missing or invalid API key' } });
     if (!principal.scopes.some((scope) => scope === 'admin:read' || scope === 'admin:write')) {
       return reply.code(403).send({ error: { code: 'authorization_error', message: "Credential requires 'admin:read' scope" } });

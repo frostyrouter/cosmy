@@ -28,6 +28,8 @@ At startup, configured manifests are merged with the simulator manifest. The pro
 
 Before provider execution, `RouterService` awaits semantic classification and the reasoning gate. Streaming does not emit headers or provider deltas until route construction completes.
 
+`REQUEST_TIMEOUT_MS` bounds this routing work as well as provider execution. For streams it is a time-to-first-canonical-event deadline and is released after visible output begins. See [end-to-end deadlines](32-end-to-end-deadlines.md).
+
 Each complete or stream attempt has:
 
 1. A request-local timeout.
@@ -40,4 +42,6 @@ Streaming retries are allowed only before the first output delta. Once visible o
 
 ## Production requirements
 
-The in-memory breaker is appropriate for one process and local development. A multi-instance deployment should replace it with a shared or instance-aware health store, otherwise each worker will learn provider health independently. Retry budgets should also be bounded per tenant and provider to avoid retry storms.
+Memory mode keeps breaker and health state inside one process. PostgreSQL mode instead writes every observed provider outcome to `provider_health_events`, atomically updates `provider_health_state`, and polls that shared snapshot every `HEALTH_REFRESH_SECONDS` (default 2). Local outcomes affect routing immediately; database writes are serialized on a dedicated pool and stay off the provider-response critical path. Other instances normally converge within one refresh interval.
+
+Three consecutive observed failures make a model ineligible for the existing 30-second cooldown. A later success resets the shared consecutive-failure count. Set `HEALTH_REFRESH_SECONDS=0` only for a single instance or when an external refresh/restart mechanism exists. `health_store_failure` records asynchronous write and refresh failures; these failures preserve local routing state but reduce cross-instance freshness. Retry budgets should also be bounded per tenant and provider to avoid retry storms.

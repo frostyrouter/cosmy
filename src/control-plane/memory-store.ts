@@ -1,29 +1,85 @@
 import { randomUUID } from 'node:crypto';
 import type { ModelConfiguration } from '../domain/types.js';
 import type { BudgetAdministration, BudgetSnapshot, RegistrySnapshot, VersionedModelRegistry } from '../ports/stores.js';
-import type { AuditEvent, ControlPlaneStore } from '../persistence/contracts.js';
+import type { AuditEvent, AuditPosition, ControlPlaneStore } from '../persistence/contracts.js';
 import { nowIso } from '../util/ids.js';
 import type { ModelPromotionEvidence } from './promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import { RouterError } from '../domain/errors.js';
 import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
+import type { TenantPolicyBundle, TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 const maximumEvidenceVersions = 10_000;
 const maximumEvidenceRecordsPerVersion = 20;
 
 export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly audit: AuditEvent[] = [];
+  private readonly registryHistory = new Map<number, RegistrySnapshot>();
+  private readonly tenantPolicies = new Map<string, TenantPolicyBundle>();
   private readonly evidence = new Map<string, ModelPromotionEvidence[]>();
   private readonly rollouts = new Map<string, ModelRollout>();
   private readonly shadowCampaigns = new Map<string, ShadowCampaign>();
   private readonly shadowReservations = new Map<string, { reservation: ShadowReservation; createdAtMs: number; reconciled: boolean }>();
 
-  constructor(private readonly registry: VersionedModelRegistry, private readonly budgets: BudgetAdministration) {}
+  constructor(private readonly registry: VersionedModelRegistry, private readonly budgets: BudgetAdministration) {
+    const initial = registry.currentSnapshot();
+    this.registryHistory.set(initial.version, structuredClone(initial));
+  }
 
   async publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
     const result = this.registry.publish(input.models, input.source);
+    this.registryHistory.set(result.version, structuredClone(result));
     this.record(input.actorCredentialId, input.actorTenantId, 'models.publish', `registry:${result.version}`, { source: input.source, modelCount: input.models.length });
     return result;
+  }
+
+  async registrySnapshot(version: number): Promise<RegistrySnapshot | undefined> {
+    const value = this.registryHistory.get(version);
+    return value ? structuredClone(value) : undefined;
+  }
+
+  async rollbackModels(input: { targetVersion: number; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    const current = this.registry.currentSnapshot();
+    if (current.version !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying rollback', 'registry_version_conflict', 409, false);
+    if (input.targetVersion >= current.version) throw new RouterError('Rollback target must be older than the current registry version', 'invalid_rollback_target', 409, false);
+    const target = this.registryHistory.get(input.targetVersion);
+    if (!target) throw new RouterError('Registry rollback target was not found', 'registry_snapshot_not_found', 404, false);
+    const result = this.registry.publish(target.models, `rollback:${input.targetVersion}`);
+    this.registryHistory.set(result.version, structuredClone(result));
+    this.record(input.actorCredentialId, input.actorTenantId, 'models.rollback', `registry:${result.version}`, { targetVersion: input.targetVersion, previousVersion: current.version, reason: input.reason, modelCount: result.models.length });
+    return result;
+  }
+
+  async disableModel(input: { modelId: string; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    const current = this.registry.currentSnapshot();
+    if (current.version !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying model disable', 'registry_version_conflict', 409, false);
+    const target = current.models.find((model) => model.id === input.modelId);
+    if (!target) throw new RouterError('Model was not found in the current registry', 'model_not_found', 404, false);
+    if (!target.enabled) return current;
+    if (current.models.filter((model) => model.enabled).length <= 1) throw new RouterError('Cannot disable the last enabled model', 'last_enabled_model', 409, false);
+    const models = current.models.map((model) => model.id === input.modelId ? { ...model, enabled: false } : model);
+    const result = this.registry.publish(models, `disable:${input.modelId}`);
+    this.registryHistory.set(result.version, structuredClone(result));
+    this.record(input.actorCredentialId, input.actorTenantId, 'models.disable', `registry:${result.version}`, { modelId: target.id, modelVersion: target.version, provider: target.provider, previousVersion: current.version, reason: input.reason });
+    return result;
+  }
+
+  async listTenantPolicies(): Promise<readonly TenantPolicyBundle[]> { return [...this.tenantPolicies.values()].map((policy) => structuredClone(policy)); }
+
+  async tenantPolicy(tenantId: string): Promise<TenantPolicyBundle | undefined> {
+    const policy = this.tenantPolicies.get(tenantId);
+    return policy ? structuredClone(policy) : undefined;
+  }
+
+  async setTenantPolicy(input: TenantPolicyConstraints & { tenantId: string; expectedVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<TenantPolicyBundle> {
+    const current = this.tenantPolicies.get(input.tenantId);
+    if ((current?.version ?? 0) !== input.expectedVersion) throw new RouterError('Tenant policy version changed; reload before retrying', 'policy_version_conflict', 409, false);
+    const now = nowIso();
+    const { expectedVersion: _expectedVersion, reason, actorCredentialId, actorTenantId, ...constraints } = input;
+    const policy: TenantPolicyBundle = { ...constraints, version: (current?.version ?? 0) + 1, createdAt: current?.createdAt ?? now, updatedAt: now };
+    this.tenantPolicies.set(input.tenantId, structuredClone(policy));
+    this.record(actorCredentialId, actorTenantId, 'policy.set', `tenant:${input.tenantId}`, { version: policy.version, reason });
+    return structuredClone(policy);
   }
 
   budgetFor(tenantId: string): Promise<BudgetSnapshot> { return this.budgets.budgetFor(tenantId); }
@@ -34,7 +90,17 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return result;
   }
 
-  async listAudit(limit: number): Promise<readonly AuditEvent[]> { return this.audit.slice(0, limit).map((event) => structuredClone(event)); }
+  async listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]> {
+    return this.audit
+      .filter((event) => !before || event.occurredAt < before.occurredAt || (event.occurredAt === before.occurredAt && event.id < before.id))
+      .sort((left, right) => left.occurredAt === right.occurredAt ? (left.id === right.id ? 0 : left.id > right.id ? -1 : 1) : left.occurredAt > right.occurredAt ? -1 : 1)
+      .slice(0, limit)
+      .map((event) => structuredClone(event));
+  }
+
+  async verifyAudit() {
+    return { valid: true, checkedEvents: this.audit.length, headSequence: this.audit.length || null, headHash: null };
+  }
 
   async submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence> {
     const { actorCredentialId, actorTenantId, ...submitted } = input;

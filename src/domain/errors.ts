@@ -22,8 +22,18 @@ export class NoRouteError extends RouterError {
 }
 
 export class ProviderError extends RouterError {
-  constructor(message: string, retryable = true, cause?: Error) {
-    super(message, 'provider_error', 502, retryable, { cause });
+  constructor(message: string, retryable = true, cause?: Error, code = 'provider_error', statusCode = 502) {
+    super(message, code, statusCode, retryable, { cause });
+  }
+}
+
+export class ProviderSaturatedError extends ProviderError {
+  constructor() { super('Provider concurrency limit reached', true, undefined, 'provider_saturated', 503); }
+}
+
+export class OutputValidationError extends RouterError {
+  constructor(message: string, public readonly actualCostUsd: number, public readonly issues: readonly string[]) {
+    super(message, 'output_validation_failed', 502, true);
   }
 }
 

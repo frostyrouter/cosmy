@@ -18,11 +18,11 @@ All APIs use explicit versions. Experimental fields are namespaced and disabled 
 Supported modes:
 
 - Project API key
-- OAuth 2.0 access token
-- Workload identity federation
-- Mutual TLS for private deployments
+- Signed OIDC/OAuth 2.0 JWT access token with an explicitly configured issuer, audience, JWKS URI, and claim mapping
+- Mutual TLS for private deployments (design target; not implemented)
 
 Credentials identify tenant, project, environment, principal, and scopes. Provider credentials are never accepted in ordinary request bodies.
+API keys and OIDC tokens share the same `Authorization: Bearer` entry point. See [cached OIDC workload identity](39-oidc-workload-identity.md) for the accepted JWT profile and rotation behavior.
 
 ## Create response
 
@@ -74,6 +74,8 @@ interface RoutingControls {
   explain?: "none" | "summary" | "detailed";
 }
 ```
+
+Implementation note: `allowedProviders`, `deniedProviders`, `allowedModels`, `deniedModels`, and `allowedRegions` are supported request-level tightening controls. Durable operator bundles additionally constrain allowed data classes, cost, latency, quality, and fallback. Request and durable values are resolved so callers cannot relax the operator policy; see [durable tenant policy bundles](38-durable-tenant-policy-bundles.md).
 
 ## Non-streaming response
 
@@ -128,6 +130,8 @@ response.failed
 
 Every event contains response ID, sequence number, event type, and typed payload. Sequence numbers are monotonic per response. Clients ignore unknown event types for forward compatibility.
 
+Implementation note: typed text, route, tool-call, usage, completion, and failure events are implemented. See [normalized tools and events](30-normalized-tools-and-events.md). Cancellation endpoints and asynchronous reconnect remain proposed.
+
 ## Cancellation
 
 Closing the client connection requests cancellation but is not proof of provider cancellation. An explicit endpoint is available for asynchronous work:
@@ -147,6 +151,8 @@ Tool definitions use JSON Schema. The canonical tool loop distinguishes:
 - Provider-hosted tools
 
 Provider-hosted tools are non-portable capabilities and must be named in route eligibility. Tool results reference stable call IDs. Parallel calls preserve individual status and errors.
+
+Implementation note: provider calls are normalized and returned for client execution, including fragmented streaming arguments. Stateless tool-result continuation is implemented through assistant `toolCalls` plus matched tool messages; see [tool-result continuations](31-tool-result-continuations.md). A Cosmy-managed execution loop remains proposed.
 
 ## Structured output
 
@@ -195,13 +201,19 @@ Errors declare retryability and safe retry timing. Raw provider errors are redac
 
 ## Explain endpoint
 
+Implementation note: the current endpoint is tenant-scoped, requires `routing:read`, and uses the response request ID as its decision ID. See [routing query APIs](28-routing-query-apis.md).
+
 ```http
 GET /v1/routing/decisions/{decision_id}
 ```
 
-Authorized output includes effective constraints, rejected-candidate reason codes, normalized candidate metrics, selection reason, attempts, fallback behavior, and version references. It excludes provider credentials, private prompts beyond retention policy, and hidden chain-of-thought.
+Authorized output includes effective constraints, rejected-candidate reason codes, normalized candidate metrics, selection reason, attempts, fallback behavior, and version references. It excludes prompts, outputs, provider credentials, raw provider errors, provider request IDs, and hidden chain-of-thought.
+
+Implementation note: route-less semantic/routing rejections and ordered candidate-level fallback attempts are persisted. Attempts contain normalized status, latency, error code, and usage—not prompt/output content or raw provider errors. See [complete decision evidence](34-complete-decision-evidence.md).
 
 ## Simulate endpoint
+
+Implementation note: deterministic non-provider simulation is implemented at this path. External classification is deliberately skipped so simulation cannot create provider charges.
 
 ```http
 POST /v1/routing/simulate
@@ -210,6 +222,8 @@ POST /v1/routing/simulate
 Simulation runs normalization, feature extraction, filtering, and ranking without provider execution or billable generation. Callers may specify a proposed registry or policy version. Results are clearly marked non-binding because provider health can change.
 
 ## Models endpoint
+
+Implementation note: enabled rollout-visible model discovery is implemented at this path and requires `routing:read`.
 
 ```http
 GET /v1/models
@@ -227,6 +241,26 @@ X-Change-Reason: <ticket-or-explanation>
 ```
 
 High-impact actions such as credential rotation, provider enablement, policy relaxation, and model promotion may require dual approval.
+
+Administrative audit reads use stable keyset pagination. `GET /v1/admin/audit` returns `events` and a nullable opaque `nextCursor`; pass that value as the next request's `cursor` without decoding or modifying it. Invalid cursors return `400 invalid_request`.
+
+`POST /v1/admin/models/rollback` restores a prior durable registry snapshot as a new monotonic version. It requires `admin:write`, an operator reason, and `If-Match` containing the current version so concurrent or repeated commands cannot silently overwrite a newer publication.
+
+`POST /v1/admin/models/disable` creates a new snapshot with one model removed from route admission. It requires the same precondition and reason, is idempotent against an already-disabled current model, and refuses to disable the final enabled model.
+
+`GET`/`PUT /v1/admin/tenants/{tenantId}/policy` read and replace versioned tenant routing constraints. Creation uses `If-Match: 0`; stale updates return `409`. The route decision's policy version includes the applied tenant bundle version.
+
+### Durable API credentials
+
+The implemented credential-management endpoints require `admin:write`:
+
+```http
+GET /v1/admin/credentials
+POST /v1/admin/credentials
+POST /v1/admin/credentials/{credential_id}/disable
+```
+
+Creation accepts a caller-generated SHA-256 key digest, tenant ID, credential ID, and scopes. Cosmy never accepts, returns, or persists the plaintext key, and list/create/disable responses omit the digest. Exact create and disable retries are idempotent. At least one enabled durable `admin:write` credential is protected under concurrent revocations. See [durable credential lifecycle](35-durable-credential-lifecycle.md) for rollout and revocation timing.
 
 ## Compatibility policy
 

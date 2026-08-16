@@ -7,6 +7,7 @@ export interface AppConfig {
   environment: 'development' | 'test' | 'production';
   requestTimeoutMs: number;
   providerMaxRetries: number;
+  providerMaxConcurrency: number;
   persistenceMode?: 'memory' | 'postgres';
   databaseUrl?: string;
   cacheMode?: 'off' | 'memory';
@@ -20,6 +21,22 @@ export interface AppConfig {
   reservationLeaseSeconds?: number;
   reconciliationSweepSeconds?: number;
   registryRefreshSeconds?: number;
+  healthRefreshSeconds?: number;
+  credentialRefreshSeconds?: number;
+  policyRefreshSeconds?: number;
+  oidcIssuer?: string;
+  oidcAudience?: string;
+  oidcJwksUri?: string;
+  oidcAlgorithms?: readonly string[];
+  oidcTenantClaim?: string;
+  oidcScopeClaim?: string;
+  oidcScopePrefix?: string;
+  oidcTokenType?: string;
+  oidcMaximumTokenAgeSeconds?: number;
+  oidcClockToleranceSeconds?: number;
+  oidcJwksRefreshSeconds?: number;
+  oidcMaximumJwksStaleSeconds?: number;
+  oidcRequestTimeoutMs?: number;
   classifierMode?: 'disabled' | 'degrade' | 'fail';
   classifierTimeoutMs?: number;
 }
@@ -54,6 +71,7 @@ function validateConfig(config: AppConfig): AppConfig {
   if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65_535) throw new Error(`Expected port between 0 and 65535, received '${config.port}'`);
   if (!Number.isFinite(config.requestTimeoutMs) || config.requestTimeoutMs <= 0) throw new Error(`Expected a positive request timeout, received '${config.requestTimeoutMs}'`);
   if (!Number.isInteger(config.providerMaxRetries) || config.providerMaxRetries < 0) throw new Error(`Expected non-negative provider retries, received '${config.providerMaxRetries}'`);
+  if (!Number.isInteger(config.providerMaxConcurrency) || config.providerMaxConcurrency <= 0) throw new Error(`Expected positive provider maximum concurrency, received '${config.providerMaxConcurrency}'`);
   if (config.responseCacheTtlSeconds !== undefined && (!Number.isInteger(config.responseCacheTtlSeconds) || config.responseCacheTtlSeconds < 0)) throw new Error(`Expected a non-negative cache TTL, received '${config.responseCacheTtlSeconds}'`);
   if (config.rateLimitMax !== undefined && (!Number.isInteger(config.rateLimitMax) || config.rateLimitMax < 0)) throw new Error(`Expected a non-negative rate limit, received '${config.rateLimitMax}'`);
   if (config.tenantBudgetUsd !== undefined && (!Number.isFinite(config.tenantBudgetUsd) || config.tenantBudgetUsd <= 0)) throw new Error(`Expected a positive tenant budget, received '${config.tenantBudgetUsd}'`);
@@ -61,6 +79,17 @@ function validateConfig(config: AppConfig): AppConfig {
   if (config.reservationLeaseSeconds !== undefined && (!Number.isInteger(config.reservationLeaseSeconds) || config.reservationLeaseSeconds <= 0)) throw new Error(`Expected a positive reservation lease, received '${config.reservationLeaseSeconds}'`);
   if (config.reconciliationSweepSeconds !== undefined && (!Number.isInteger(config.reconciliationSweepSeconds) || config.reconciliationSweepSeconds < 0)) throw new Error(`Expected a non-negative reconciliation interval, received '${config.reconciliationSweepSeconds}'`);
   if (config.registryRefreshSeconds !== undefined && (!Number.isInteger(config.registryRefreshSeconds) || config.registryRefreshSeconds < 0)) throw new Error(`Expected a non-negative registry refresh interval, received '${config.registryRefreshSeconds}'`);
+  if (config.healthRefreshSeconds !== undefined && (!Number.isInteger(config.healthRefreshSeconds) || config.healthRefreshSeconds < 0)) throw new Error(`Expected a non-negative health refresh interval, received '${config.healthRefreshSeconds}'`);
+  if (config.credentialRefreshSeconds !== undefined && (!Number.isInteger(config.credentialRefreshSeconds) || config.credentialRefreshSeconds < 0)) throw new Error(`Expected a non-negative credential refresh interval, received '${config.credentialRefreshSeconds}'`);
+  if (config.policyRefreshSeconds !== undefined && (!Number.isInteger(config.policyRefreshSeconds) || config.policyRefreshSeconds < 0)) throw new Error(`Expected a non-negative policy refresh interval, received '${config.policyRefreshSeconds}'`);
+  const oidcValues = [config.oidcIssuer, config.oidcAudience, config.oidcJwksUri];
+  if (oidcValues.some((value) => value !== undefined) && oidcValues.some((value) => !value)) throw new Error('OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URI must be configured together');
+  if (config.oidcAlgorithms !== undefined && (config.oidcAlgorithms.length === 0 || config.oidcAlgorithms.some((algorithm) => !['RS256', 'PS256', 'ES256', 'EdDSA'].includes(algorithm)))) throw new Error('OIDC algorithms must be a non-empty allowlist of RS256, PS256, ES256, or EdDSA');
+  if (config.oidcMaximumTokenAgeSeconds !== undefined && (!Number.isInteger(config.oidcMaximumTokenAgeSeconds) || config.oidcMaximumTokenAgeSeconds <= 0)) throw new Error('Expected a positive OIDC maximum token age');
+  if (config.oidcClockToleranceSeconds !== undefined && (!Number.isInteger(config.oidcClockToleranceSeconds) || config.oidcClockToleranceSeconds < 0)) throw new Error('Expected a non-negative OIDC clock tolerance');
+  if (config.oidcJwksRefreshSeconds !== undefined && (!Number.isInteger(config.oidcJwksRefreshSeconds) || config.oidcJwksRefreshSeconds < 0)) throw new Error('Expected a non-negative OIDC JWKS refresh interval');
+  if (config.oidcMaximumJwksStaleSeconds !== undefined && (!Number.isInteger(config.oidcMaximumJwksStaleSeconds) || config.oidcMaximumJwksStaleSeconds <= 0)) throw new Error('Expected a positive OIDC maximum JWKS stale interval');
+  if (config.oidcRequestTimeoutMs !== undefined && (!Number.isInteger(config.oidcRequestTimeoutMs) || config.oidcRequestTimeoutMs <= 0)) throw new Error('Expected a positive OIDC request timeout');
   if (config.classifierTimeoutMs !== undefined && (!Number.isFinite(config.classifierTimeoutMs) || config.classifierTimeoutMs <= 0)) throw new Error(`Expected a positive classifier timeout, received '${config.classifierTimeoutMs}'`);
   return config;
 }
@@ -81,7 +110,7 @@ function credentialsEnv(value: string | undefined): readonly ApiCredential[] | u
     if (typeof entry !== 'object' || entry === null) throw new Error(`Credential at index ${index} must be an object`);
     const value = entry as Record<string, unknown>;
     const scopes = value.scopes ?? ['responses:create'];
-    const allowedScopes: readonly ApiScope[] = ['responses:create', 'admin:read', 'admin:write', 'metrics:read'];
+    const allowedScopes: readonly ApiScope[] = ['responses:create', 'routing:read', 'admin:read', 'admin:write', 'metrics:read'];
     if (typeof value.id !== 'string' || typeof value.tenantId !== 'string' || typeof value.keySha256 !== 'string' || !Array.isArray(scopes) || scopes.some((scope) => !allowedScopes.includes(scope as ApiScope))) {
       throw new Error(`Credential at index ${index} is invalid`);
     }
@@ -110,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     environment: environment as AppConfig['environment'],
     requestTimeoutMs: numberEnv(env.REQUEST_TIMEOUT_MS, 60_000),
     providerMaxRetries: numberEnv(env.PROVIDER_MAX_RETRIES, 2),
+    providerMaxConcurrency: positiveIntegerEnv(env.PROVIDER_MAX_CONCURRENCY, 100),
     persistenceMode: env.PERSISTENCE_MODE === 'postgres' ? 'postgres' : 'memory',
     ...(env.DATABASE_URL ? { databaseUrl: env.DATABASE_URL } : {}),
     cacheMode: env.CACHE_MODE === 'memory' ? 'memory' : 'off',
@@ -123,6 +153,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     reservationLeaseSeconds: positiveIntegerEnv(env.RESERVATION_LEASE_SECONDS, 300),
     reconciliationSweepSeconds: nonNegativeIntegerEnv(env.RECONCILIATION_SWEEP_SECONDS, 30),
     registryRefreshSeconds: nonNegativeIntegerEnv(env.REGISTRY_REFRESH_SECONDS, 15),
+    healthRefreshSeconds: nonNegativeIntegerEnv(env.HEALTH_REFRESH_SECONDS, 2),
+    credentialRefreshSeconds: nonNegativeIntegerEnv(env.CREDENTIAL_REFRESH_SECONDS, 2),
+    policyRefreshSeconds: nonNegativeIntegerEnv(env.POLICY_REFRESH_SECONDS, 2),
+    ...(env.OIDC_ISSUER ? { oidcIssuer: env.OIDC_ISSUER } : {}),
+    ...(env.OIDC_AUDIENCE ? { oidcAudience: env.OIDC_AUDIENCE } : {}),
+    ...(env.OIDC_JWKS_URI ? { oidcJwksUri: env.OIDC_JWKS_URI } : {}),
+    oidcAlgorithms: (env.OIDC_ALGORITHMS ?? 'RS256').split(',').map((value) => value.trim()).filter(Boolean),
+    oidcTenantClaim: env.OIDC_TENANT_CLAIM ?? 'tenant_id',
+    oidcScopeClaim: env.OIDC_SCOPE_CLAIM ?? 'scope',
+    oidcScopePrefix: env.OIDC_SCOPE_PREFIX ?? 'cosmy:',
+    ...(env.OIDC_TOKEN_TYPE ? { oidcTokenType: env.OIDC_TOKEN_TYPE } : {}),
+    oidcMaximumTokenAgeSeconds: positiveIntegerEnv(env.OIDC_MAX_TOKEN_AGE_SECONDS, 3_600),
+    oidcClockToleranceSeconds: nonNegativeIntegerEnv(env.OIDC_CLOCK_TOLERANCE_SECONDS, 5),
+    oidcJwksRefreshSeconds: nonNegativeIntegerEnv(env.OIDC_JWKS_REFRESH_SECONDS, 300),
+    oidcMaximumJwksStaleSeconds: positiveIntegerEnv(env.OIDC_MAX_JWKS_STALE_SECONDS, 86_400),
+    oidcRequestTimeoutMs: positiveIntegerEnv(env.OIDC_REQUEST_TIMEOUT_MS, 2_000),
     classifierMode,
     classifierTimeoutMs: numberEnv(env.CLASSIFIER_TIMEOUT_MS, 3_000),
   });

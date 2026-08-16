@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { sha256ApiKey, StaticApiKeyAuthenticator } from '../src/security/auth.js';
+import { ReloadableApiKeyAuthenticator, sha256ApiKey, StaticApiKeyAuthenticator } from '../src/security/auth.js';
 
 describe('tenant authentication', () => {
   it('stores and compares only API-key digests', () => {
@@ -33,6 +33,21 @@ describe('tenant authentication', () => {
   it('parses the dedicated metrics scope', () => {
     const digest = sha256ApiKey('scraper');
     expect(loadConfig({ COSMY_API_CREDENTIALS: JSON.stringify([{ id: 'metrics', tenantId: 'operations', keySha256: digest, scopes: ['metrics:read'] }]) }).apiCredentials?.[0]?.scopes).toEqual(['metrics:read']);
+  });
+
+  it('atomically replaces durable credentials without restarting authentication', () => {
+    const authenticator = new ReloadableApiKeyAuthenticator([{ id: 'bootstrap', tenantId: 'platform', keySha256: sha256ApiKey('bootstrap'), scopes: ['admin:write'] }]);
+    authenticator.replaceDynamic([{ id: 'project-a', tenantId: 'tenant-a', keySha256: sha256ApiKey('first-key'), scopes: ['responses:create'] }]);
+    expect(authenticator.authenticate('Bearer first-key')).toMatchObject({ credentialId: 'project-a', tenantId: 'tenant-a' });
+    authenticator.replaceDynamic([{ id: 'project-b', tenantId: 'tenant-b', keySha256: sha256ApiKey('second-key'), scopes: ['responses:create'] }]);
+    expect(authenticator.authenticate('Bearer first-key')).toBeUndefined();
+    expect(authenticator.authenticate('Bearer second-key')).toMatchObject({ credentialId: 'project-b', tenantId: 'tenant-b' });
+    expect(authenticator.authenticate('Bearer bootstrap')).toMatchObject({ credentialId: 'bootstrap' });
+  });
+
+  it('parses the tenant-scoped routing read permission', () => {
+    const digest = sha256ApiKey('routing-reader');
+    expect(loadConfig({ COSMY_API_CREDENTIALS: JSON.stringify([{ id: 'routing', tenantId: 'tenant-a', keySha256: digest, scopes: ['routing:read'] }]) }).apiCredentials?.[0]?.scopes).toEqual(['routing:read']);
   });
 
   it('rejects malformed credential configuration', () => {

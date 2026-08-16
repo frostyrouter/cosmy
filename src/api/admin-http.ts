@@ -4,6 +4,7 @@ import { RouterError } from '../domain/errors.js';
 import type { ModelConfiguration } from '../domain/types.js';
 import type { ControlPlaneService } from '../control-plane/service.js';
 import type { ApiScope, RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
+import type { TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 const modelSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/u), provider: z.string().min(1).max(64), model: z.string().min(1).max(128), version: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/u), enabled: z.boolean(),
@@ -24,9 +25,17 @@ const modelSchema = z.object({
 }).strict();
 
 const publishSchema = z.object({ source: z.string().min(1).max(200), models: z.array(modelSchema).min(1).max(1_000) }).strict();
+const rollbackSchema = z.object({ targetVersion: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), reason: z.string().min(1).max(500) }).strict();
+const disableModelSchema = z.object({ modelId: modelSchema.shape.id, reason: z.string().min(1).max(500) }).strict();
+const uniqueStrings = (maximum: number) => z.array(z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/u)).max(maximum).refine((values) => new Set(values).size === values.length, 'Values must be unique');
+const tenantPolicySchema = z.object({
+  allowedProviders: uniqueStrings(64).optional(), deniedProviders: uniqueStrings(64).optional(), allowedModels: uniqueStrings(1_000).optional(), deniedModels: uniqueStrings(1_000).optional(),
+  allowedRegions: uniqueStrings(64).optional(), allowedDataClasses: z.array(z.enum(['public', 'internal', 'confidential', 'restricted'])).min(1).max(4).refine((values) => new Set(values).size === values.length, 'Values must be unique').optional(),
+  maxCostUsd: z.number().nonnegative().max(1_000_000_000).optional(), maxLatencyMs: z.number().int().positive().max(3_600_000).optional(), minQuality: z.number().min(0).max(1).optional(), allowFallback: z.boolean().optional(),
+}).strict();
 const budgetSchema = z.object({ limitUsd: z.number().nonnegative().max(1_000_000_000) }).strict();
 const tenantSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
-const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).strict();
+const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), cursor: z.string().min(1).max(512).optional() }).strict();
 const evidenceSchema = z.object({
   modelId: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/u), modelVersion: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/u),
   suiteVersion: z.string().min(1).max(128), datasetVersion: z.string().min(1).max(128),
@@ -47,9 +56,16 @@ const shadowCampaignSchema = z.object({
   allowedDataClasses: z.array(z.enum(['public', 'internal'])).min(1).max(2),
 }).strict();
 const shadowActionSchema = z.object({ id: rolloutIdSchema, action: z.enum(['pause', 'resume', 'complete']) }).strict();
+const credentialIdSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
+const credentialSchema = z.object({
+  id: credentialIdSchema,
+  tenantId: tenantSchema,
+  keySha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  scopes: z.array(z.enum(['responses:create', 'routing:read', 'admin:read', 'admin:write', 'metrics:read'])).min(1).max(5),
+}).strict().refine((value) => new Set(value.scopes).size === value.scopes.length, { message: 'Credential scopes must be unique', path: ['scopes'] });
 
-function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): RequestPrincipal {
-  const principal = authenticator?.authenticate(authorization);
+async function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): Promise<RequestPrincipal> {
+  const principal = await authenticator?.authenticate(authorization);
   if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401, false);
   const authorized = principal.scopes.includes(scope) || (scope === 'admin:read' && principal.scopes.includes('admin:write'));
   if (!authorized) throw new RouterError(`Credential requires '${scope}' scope`, 'authorization_error', 403, false);
@@ -62,29 +78,104 @@ function sendError(reply: FastifyReply, error: unknown) {
   throw error;
 }
 
+function requiredRegistryVersion(value: string | string[] | undefined): number {
+  const text = Array.isArray(value) ? value[0] : value;
+  const match = text?.match(/^(?:"([1-9][0-9]*)"|([1-9][0-9]*))$/u);
+  if (!match) throw new RouterError('Registry mutation requires If-Match with the current registry version', 'precondition_required', 428, false);
+  const version = Number(match[1] ?? match[2]);
+  if (!Number.isSafeInteger(version)) throw new RouterError('If-Match registry version is invalid', 'invalid_request', 400, false);
+  return version;
+}
+
+function requiredPolicyVersion(value: string | string[] | undefined): number {
+  const text = Array.isArray(value) ? value[0] : value;
+  const match = text?.match(/^(?:"(0|[1-9][0-9]*)"|(0|[1-9][0-9]*))$/u);
+  if (!match) throw new RouterError('Tenant policy mutation requires If-Match with its current version, or 0 when creating', 'precondition_required', 428, false);
+  const version = Number(match[1] ?? match[2]);
+  if (!Number.isSafeInteger(version)) throw new RouterError('If-Match policy version is invalid', 'invalid_request', 400, false);
+  return version;
+}
+
+function requiredChangeReason(value: string | string[] | undefined): string {
+  if (Array.isArray(value) || typeof value !== 'string' || value.length < 1 || value.length > 500) throw new RouterError('X-Change-Reason must contain 1-500 characters', 'precondition_required', 428, false);
+  return value;
+}
+
 export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneService, authenticator?: RequestAuthenticator): void {
+  app.get('/v1/admin/credentials', async (request, reply) => {
+    try { await requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return { credentials: await service.listCredentials() }; } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/credentials', async (request, reply) => {
+    try {
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      return reply.code(201).send(await service.createCredential(credentialSchema.parse(request.body), actor));
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post<{ Params: { id: string } }>('/v1/admin/credentials/:id/disable', async (request, reply) => {
+    try {
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      return await service.disableCredential(credentialIdSchema.parse(request.params.id), actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.get('/v1/admin/models', async (request, reply) => {
-    try { requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return service.snapshot(); } catch (error) { return sendError(reply, error); }
+    try { await requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return service.snapshot(); } catch (error) { return sendError(reply, error); }
   });
 
   app.put('/v1/admin/models', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = publishSchema.parse(request.body);
       return await service.publishModels(input.models as readonly ModelConfiguration[], input.source, actor);
     } catch (error) { return sendError(reply, error); }
   });
 
+  app.post('/v1/admin/models/rollback', async (request, reply) => {
+    try {
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const input = rollbackSchema.parse(request.body);
+      return await service.rollbackModels(input.targetVersion, requiredRegistryVersion(request.headers['if-match']), input.reason, actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/models/disable', async (request, reply) => {
+    try {
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const input = disableModelSchema.parse(request.body);
+      return await service.disableModel(input.modelId, requiredRegistryVersion(request.headers['if-match']), input.reason, actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/policy', async (request, reply) => {
+    try {
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      const policy = await service.tenantPolicy(tenantSchema.parse(request.params.tenantId));
+      if (!policy) return reply.code(404).send({ error: { code: 'not_found', message: 'Tenant policy was not found' } });
+      return policy;
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.put<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/policy', async (request, reply) => {
+    try {
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const parsed = tenantPolicySchema.parse(request.body);
+      const constraints = Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined)) as TenantPolicyConstraints;
+      return await service.setTenantPolicy(tenantSchema.parse(request.params.tenantId), requiredPolicyVersion(request.headers['if-match']), requiredChangeReason(request.headers['x-change-reason']), constraints, actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.get<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/budget', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       return await service.budgetFor(tenantSchema.parse(request.params.tenantId));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.put<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/budget', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = budgetSchema.parse(request.body);
       return await service.setBudget(tenantSchema.parse(request.params.tenantId), input.limitUsd, actor);
     } catch (error) { return sendError(reply, error); }
@@ -92,22 +183,30 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.get('/v1/admin/audit', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const query = auditQuerySchema.parse(request.query);
-      return { events: await service.listAudit(query.limit) };
+      return await service.listAuditPage(query.limit, query.cursor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get('/v1/admin/audit/verify', async (request, reply) => {
+    try {
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      const verification = await service.verifyAudit();
+      return reply.code(verification.valid ? 200 : 409).send(verification);
     } catch (error) { return sendError(reply, error); }
   });
 
   app.post('/v1/admin/model-evidence', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return reply.code(201).send(await service.submitEvidence(evidenceSchema.parse(request.body), actor));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.get('/v1/admin/model-evidence', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const query = evidenceSchema.pick({ modelId: true, modelVersion: true }).parse(request.query);
       const { modelId, modelVersion } = query;
       const evidence = await service.evidenceFor(modelId, modelVersion);
@@ -118,21 +217,21 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/model-promotion-assessments', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       return await service.assessCandidate(modelSchema.parse(request.body) as ModelConfiguration);
     } catch (error) { return sendError(reply, error); }
   });
 
   app.post('/v1/admin/model-rollouts', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return reply.code(201).send(await service.createRollout(rolloutSchema.parse(request.body), actor));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.get<{ Params: { id: string } }>('/v1/admin/model-rollouts/:id', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const rollout = await service.rollout(rolloutIdSchema.parse(request.params.id));
       if (!rollout) return reply.code(404).send({ error: { code: 'not_found', message: 'Model rollout was not found' } });
       return rollout;
@@ -141,7 +240,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/model-rollout-actions', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = rolloutActionSchema.parse(request.body);
       return await service.changeRollout(input.id, input.action, input.reason, actor);
     } catch (error) { return sendError(reply, error); }
@@ -149,14 +248,14 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/shadow-campaigns', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return reply.code(201).send(await service.createShadowCampaign(shadowCampaignSchema.parse(request.body), actor));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.get<{ Params: { id: string } }>('/v1/admin/shadow-campaigns/:id', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const campaign = await service.shadowCampaign(rolloutIdSchema.parse(request.params.id));
       if (!campaign) return reply.code(404).send({ error: { code: 'not_found', message: 'Shadow campaign was not found' } });
       return campaign;
@@ -165,7 +264,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/shadow-campaign-actions', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write'); const input = shadowActionSchema.parse(request.body);
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write'); const input = shadowActionSchema.parse(request.body);
       return await service.changeShadowCampaign(input.id, input.action, actor);
     } catch (error) { return sendError(reply, error); }
   });

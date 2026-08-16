@@ -1,8 +1,59 @@
 import { describe, expect, it } from 'vitest';
-import { PostgresControlPlaneStore, PostgresRegistryRepository, PostgresReservationRepository, type SqlClient } from '../src/persistence/sql-adapters.js';
+import { PostgresControlPlaneStore, PostgresDecisionStore, PostgresRegistryRepository, PostgresReservationRepository, type SqlClient } from '../src/persistence/sql-adapters.js';
 import { defaultModels } from '../src/registry/default-models.js';
+import { newDecisionRecord } from './support/decision-fixture.js';
+import { PostgresHealthStore } from '../src/persistence/postgres-health-store.js';
 
 describe('durable persistence adapters', () => {
+  it('updates health locally immediately and converges on durable state', async () => {
+    const states = new Map<string, { model_id: string; successes: number; failures: number; consecutive_failures: number; last_latency_ms: number | null; updated_at: string }>();
+    const db: SqlClient = { query: async <Row>(text: string, values = []) => {
+      if (text.startsWith('SELECT')) return { rows: [...states.values()] as Row[] };
+      const [modelId, outcome, latency, successDelta, failureDelta] = values as unknown as [string, string, number | null, number, number];
+      const current = states.get(modelId) ?? { model_id: modelId, successes: 0, failures: 0, consecutive_failures: 0, last_latency_ms: null, updated_at: new Date(0).toISOString() };
+      const next = {
+        ...current,
+        successes: current.successes + successDelta,
+        failures: current.failures + failureDelta,
+        consecutive_failures: outcome === 'success' ? 0 : current.consecutive_failures + 1,
+        last_latency_ms: outcome === 'success' ? latency : current.last_latency_ms,
+        updated_at: '2026-08-12T00:00:00.000Z',
+      };
+      states.set(modelId, next);
+      return { rows: [next] as Row[] };
+    } };
+    const writer = new PostgresHealthStore(db);
+    writer.markFailure('model-a');
+    writer.markFailure('model-a');
+    writer.markFailure('model-a');
+    expect(writer.snapshot()[0]).toMatchObject({ failures: 3, consecutiveFailures: 3 });
+    await writer.flush();
+
+    const reader = new PostgresHealthStore(db);
+    await reader.refresh();
+    expect(reader.snapshot()[0]).toMatchObject({ failures: 3, consecutiveFailures: 3 });
+    reader.markSuccess('model-a', 42);
+    await reader.flush();
+    expect(reader.snapshot()[0]).toMatchObject({ successes: 1, failures: 3, consecutiveFailures: 0, lastLatencyMs: 42 });
+  });
+
+  it('does not let a delayed health refresh overwrite a newer local observation', async () => {
+    let releaseRefresh: ((value: { rows: unknown[] }) => void) | undefined;
+    const db: SqlClient = { query: async <Row>(text: string) => {
+      if (text.startsWith('SELECT')) return new Promise<{ rows: Row[] }>((resolve) => {
+        releaseRefresh = (value) => resolve(value as { rows: Row[] });
+      });
+      return { rows: [{ model_id: 'model-a', successes: 0, failures: 1, consecutive_failures: 1, last_latency_ms: null, updated_at: '2026-08-12T00:00:01.000Z' }] as Row[] };
+    } };
+    const store = new PostgresHealthStore(db);
+    const refresh = store.refresh();
+    store.markFailure('model-a');
+    await store.flush();
+    releaseRefresh?.({ rows: [{ model_id: 'model-a', successes: 0, failures: 0, consecutive_failures: 0, last_latency_ms: null, updated_at: '2026-08-12T00:00:00.000Z' }] });
+    await refresh;
+    expect(store.snapshot()[0]).toMatchObject({ failures: 1, consecutiveFailures: 1 });
+  });
+
   it('publishes a registry snapshot transactionally', async () => {
     const queries: string[] = [];
     const db = {
@@ -45,6 +96,23 @@ describe('durable persistence adapters', () => {
     };
     await expect(new PostgresControlPlaneStore(primary, rollout).recordRolloutOutcome({ modelId: 'candidate', modelVersion: '2', status: 'success', latencyMs: 20 })).resolves.toMatchObject({ sampleCount: 1 });
     expect(queries).toEqual(expect.arrayContaining([expect.stringContaining('statement_timeout'), expect.stringContaining('lock_timeout'), expect.stringContaining('UPDATE model_rollouts')]));
+  });
+
+  it('upserts and tenant-scopes durable decision records', async () => {
+    const queries: Array<{ text: string; values: readonly unknown[] }> = [];
+    const source = newDecisionRecord({ id: 'decision-1', tenantId: 'tenant-a' });
+    const db: SqlClient = { query: async <Row>(text: string, values = []) => {
+      queries.push({ text, values });
+      const rows = text.startsWith('SELECT decision_id') ? [{ decision_id: source.id, tenant_id: source.tenantId, state: source.state, route: source.route, registry_version: null, outcome: null, rejection: null, attempts: [], error_code: null, created_at: source.createdAt, updated_at: source.updatedAt }] : [];
+      return { rows: rows as Row[] };
+    } };
+    const store = new PostgresDecisionStore(db);
+    await store.save(source);
+    await expect(store.get('tenant-a', source.id)).resolves.toMatchObject({ id: source.id, tenantId: 'tenant-a' });
+    expect(queries[0]?.text).toContain('ON CONFLICT (tenant_id, decision_id)');
+    expect(queries[0]?.text).toContain('rejection, attempts');
+    expect(queries[0]?.values[7]).toBe('[]');
+    expect(queries[1]?.values).toEqual(['tenant-a', source.id]);
   });
 
   it('retries bounded PostgreSQL lock contention without double-counting an outcome', async () => {

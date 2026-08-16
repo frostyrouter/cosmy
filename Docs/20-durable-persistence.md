@@ -6,9 +6,9 @@ The persistence package currently provides PostgreSQL implementations without ad
 
 ## PostgreSQL responsibilities
 
-PostgreSQL is the source of truth for model-registry snapshots, manifests, health events, reservations, and usage records. Registry publication must write a complete snapshot in one transaction, then expose it as current only after all manifests are committed. Reservation reconciliation must be idempotent by reservation ID so retries cannot double-count spend.
+PostgreSQL is the source of truth for model-registry snapshots, manifests, provider health, reservations, and usage records. Registry publication must write a complete snapshot in one transaction, then expose it as current only after all manifests are committed. Reservation reconciliation must be idempotent by reservation ID so retries cannot double-count spend.
 
-Caching and distributed coordination are deliberately deferred. The current runtime uses PostgreSQL for durable reservations and in-memory state for local health, metrics, and optional response caching.
+In PostgreSQL mode, provider outcomes append to `provider_health_events` and atomically increment `provider_health_state`. Each process applies its own observations immediately and asynchronously persists them through a dedicated bounded pool, then polls the shared aggregate every `HEALTH_REFRESH_SECONDS`. This avoids adding a health database round trip to response latency while allowing horizontally scaled routers to converge. Memory mode retains process-local health. Metrics and optional response caching remain local.
 
 ## Budget invariant
 
@@ -33,5 +33,6 @@ Startup applies numbered SQL files in lexical order inside one transaction prote
 | Reconcile usage | Only an unreconciled row can change totals. | Yes. |
 | Recover expired lease | Charge estimate once and release reserved balance. | Yes; concurrent workers use row locks. |
 | Change budget | Upserts one tenant row. | Yes. |
+| Record provider health | Keep the immediate local observation; increment `health_store_failure` if the asynchronous write fails. | A later observation is safe, but a failed event is not replayed automatically. |
 
-The SQL migrations are a production-safe baseline, not a claim that every deployment should use the same indexes or retention periods. Load testing and tenant-level access patterns should determine partitioning, archival, and query plans.
+The SQL migrations are a production-safe baseline, not a claim that every deployment should use the same indexes or retention periods. `provider_health_events` is append-only and has no built-in retention job; production operations must define archival or deletion based on audit requirements. Load testing and tenant-level access patterns should determine partitioning, archival, and query plans.

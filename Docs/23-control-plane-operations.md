@@ -1,6 +1,6 @@
 # Control-plane operations
 
-Status: Implemented for model snapshots, tenant budgets, and audit reads.
+Status: Implemented for model snapshots, tenant policies and budgets, durable credentials, and audit reads.
 
 ## What operators can change
 
@@ -8,9 +8,14 @@ Status: Implemented for model snapshots, tenant budgets, and audit reads.
 |---|---|---|
 | `GET /v1/admin/models` | `admin:read` | Read the active immutable registry snapshot |
 | `PUT /v1/admin/models` | `admin:write` | Validate and atomically publish a complete snapshot |
+| `POST /v1/admin/models/rollback` | `admin:write` | Copy an older snapshot into a new audited version; requires `If-Match` |
+| `POST /v1/admin/models/disable` | `admin:write` | Emergency-disable one model in a new audited snapshot; requires `If-Match` |
+| `GET /v1/admin/tenants/:id/policy` | `admin:read` | Read the current durable tenant routing policy |
+| `PUT /v1/admin/tenants/:id/policy` | `admin:write` | Replace a tenant policy with optimistic concurrency |
 | `GET /v1/admin/tenants/:id/budget` | `admin:read` | Read limit, reserved spend, and settled spend |
 | `PUT /v1/admin/tenants/:id/budget` | `admin:write` | Set a hard USD limit without dropping below current usage |
-| `GET /v1/admin/audit?limit=100` | `admin:read` | Read newest administrative mutations, maximum 500 |
+| `GET /v1/admin/audit?limit=100&cursor=...` | `admin:read` | Page through administrative mutations, maximum 500 per page |
+| `GET /v1/admin/audit/verify` | `admin:read` | Recompute and verify the complete PostgreSQL audit hash chain; returns 409 when invalid |
 
 `admin:write` implies read access. Ordinary `responses:create` credentials cannot call these routes. Administrative routes always require authentication, even when the response API is allowed to run unauthenticated in development.
 
@@ -29,6 +34,12 @@ Cosmy rejects empty snapshots, duplicate IDs, invalid numeric bounds, output lim
 
 Other instances poll the latest snapshot every `REGISTRY_REFRESH_SECONDS` (default 15). Set it to zero only when an external restart/reload mechanism exists. Provider credentials and adapter configuration must be uniform across instances before enabling a new provider.
 
+Rollback requires the current registry version in `If-Match`, a prior `targetVersion`, and an operator `reason`. It creates a new version rather than mutating history. Missing preconditions return `428`; stale versions return `409`. See [atomic registry rollback](36-atomic-registry-rollback.md).
+
+Emergency disable also requires `If-Match` and an operator reason. It copies the current snapshot, changes only the selected model's lifecycle flag, and refuses to disable the last enabled model. See [emergency model disable](37-emergency-model-disable.md).
+
+Tenant policy creation uses `If-Match: 0`; later replacements require the returned version. Request-level constraints can only tighten the durable bundle. See [durable tenant policy bundles](38-durable-tenant-policy-bundles.md).
+
 ## Safe budget changes
 
 ```http
@@ -43,7 +54,7 @@ Budget creation and request reservation share a tenant advisory lock. Existing r
 
 ## Audit guarantee
 
-PostgreSQL stores the mutation and its audit event in the same transaction. Events contain actor credential ID, actor tenant, action, target, safe details, and timestamp—never bearer keys or provider secrets.
+PostgreSQL stores the mutation and its audit event in the same transaction. Events contain actor credential ID, actor tenant, action, target, safe details, and timestamp—never bearer keys or provider secrets. Migration 016 serializes append ordering and chains every event with SHA-256; see [tamper-evident administrative audit](41-tamper-evident-audit.md).
 
 | Failure | Result |
 |---|---|
@@ -54,7 +65,7 @@ PostgreSQL stores the mutation and its audit event in the same transaction. Even
 
 ## Rollout checklist
 
-1. Apply managed migration `005_admin_audit.sql`.
+1. Apply managed migrations through `016_tamper_evident_audit.sql` during a maintenance window appropriate for the existing audit-row count.
 2. Create separate admin credentials; avoid giving application callers admin scopes.
 3. Publish a snapshot first in a non-production environment and execute one request per enabled provider.
 4. Use `GET /v1/admin/models` to record the resulting version.
@@ -62,4 +73,4 @@ PostgreSQL stores the mutation and its audit event in the same transaction. Even
 
 ## Current boundary
 
-This API manages model metadata and tenant spending. Credential lifecycle, policy bundles, audit export pagination, rollback shortcuts, and workload identity remain later control-plane work. Rollback today means republishing a previously recorded complete snapshot, producing a new monotonic version and audit event.
+This API manages model metadata, atomic registry rollback, emergency model disable, tenant policy and spending controls, durable hashed credentials, and stable audit-history pagination. OIDC workloads may receive administrative scopes only through a tightly controlled identity-provider claim mapping; interactive authorization flows, token issuance, introspection, and mTLS identity remain outside Cosmy.

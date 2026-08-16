@@ -3,8 +3,11 @@ const messageSchema = {
   additionalProperties: false,
   properties: {
     role: { type: 'string', enum: ['system', 'user', 'assistant', 'tool'] },
-    content: { type: 'string', minLength: 1 },
+    content: { type: 'string' },
     name: { type: 'string', minLength: 1 },
+    toolCalls: { type: 'array', minItems: 1, maxItems: 128, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string', minLength: 1, maxLength: 256 }, name: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' }, arguments: { type: 'object', additionalProperties: true } }, required: ['id', 'name', 'arguments'] } },
+    toolCallId: { type: 'string', minLength: 1, maxLength: 256 },
+    toolError: { type: 'boolean' },
   },
   required: ['role', 'content'],
 } as const;
@@ -13,7 +16,7 @@ const toolSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    name: { type: 'string', minLength: 1 },
+    name: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
     description: { type: 'string' },
     inputSchema: { type: 'object', additionalProperties: true },
   },
@@ -27,10 +30,15 @@ const policySchema = {
     tenantId: { type: 'string', minLength: 1 },
     dataClass: { type: 'string', enum: ['public', 'internal', 'confidential', 'restricted'] },
     region: { type: 'string', minLength: 1 },
+    allowedRegions: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 64 },
     maxCostUsd: { type: 'number', minimum: 0 },
     maxLatencyMs: { type: 'number', exclusiveMinimum: 0 },
     minQuality: { type: 'number', minimum: 0, maximum: 1 },
     preferProvider: { type: 'string', minLength: 1 },
+    allowedProviders: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 64 },
+    deniedProviders: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 64 },
+    allowedModels: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 1_000 },
+    deniedModels: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 1_000 },
     requireCapabilities: { type: 'array', items: { type: 'string', enum: ['streaming', 'tools', 'structured-output', 'vision', 'reasoning'] } },
     allowFallback: { type: 'boolean' },
   },
@@ -164,6 +172,12 @@ const usageSchema = {
   required: ['inputTokens', 'outputTokens', 'totalTokens', 'estimatedCostUsd'],
 } as const;
 
+const toolCallSchema = {
+  type: 'object', additionalProperties: false,
+  properties: { id: { type: 'string', minLength: 1, maxLength: 256 }, name: { type: 'string', minLength: 1, maxLength: 128 }, arguments: { type: 'object', additionalProperties: true } },
+  required: ['id', 'name', 'arguments'],
+} as const;
+
 export const responseResultJsonSchema = {
   type: 'object',
   additionalProperties: true,
@@ -172,9 +186,10 @@ export const responseResultJsonSchema = {
     model: { type: 'string' },
     provider: { type: 'string' },
     output: { type: 'string' },
+    toolCalls: { type: 'array', items: toolCallSchema },
     usage: usageSchema,
     status: { type: 'string', enum: ['completed', 'failed', 'cancelled'] },
-    finishReason: { type: 'string', enum: ['stop', 'length', 'error', 'cancelled'] },
+    finishReason: { type: 'string', enum: ['stop', 'length', 'tool_calls', 'error', 'cancelled'] },
     route: {
       type: 'object',
       additionalProperties: true,

@@ -40,11 +40,11 @@ export class SimulatorProvider implements ProviderAdapter {
     for (const [index, delta] of pieces.entries()) {
       if (input.signal.aborted) throw new RequestCancelledError();
       await this.delay(input.signal);
-      yield { requestId: input.request.requestId ?? 'unknown', index, delta, done: false };
+      yield { requestId: input.request.requestId ?? 'unknown', index, delta, done: false, type: 'text-delta' };
     }
     const outputTokens = tokenCount(output);
     const inputTokens = inputTokenCount(input);
-    yield { requestId: input.request.requestId ?? 'unknown', index: pieces.length, delta: '', done: true, usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, estimatedCostUsd: 0 } };
+    yield { requestId: input.request.requestId ?? 'unknown', index: pieces.length, delta: '', done: true, type: 'completed', usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, estimatedCostUsd: 0 } };
   }
 
   private delay(signal: AbortSignal): Promise<void> {

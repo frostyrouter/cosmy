@@ -7,6 +7,9 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   name?: string;
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+  toolError?: boolean;
 }
 
 export interface ResponseRequest {
@@ -28,6 +31,12 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
 export interface ResponseFormat {
   type: 'text' | 'json-schema';
   schema?: Record<string, unknown>;
@@ -35,12 +44,18 @@ export interface ResponseFormat {
 
 export interface PolicyHints {
   tenantId?: string;
+  tenantPolicyVersion?: number;
   dataClass?: DataClass;
   region?: string;
+  allowedRegions?: string[];
   maxCostUsd?: number;
   maxLatencyMs?: number;
   minQuality?: number;
   preferProvider?: string;
+  allowedProviders?: string[];
+  deniedProviders?: string[];
+  allowedModels?: string[];
+  deniedModels?: string[];
   requireCapabilities?: Capability[];
   allowFallback?: boolean;
 }
@@ -201,9 +216,10 @@ export interface ResponseResult {
   model: string;
   provider: string;
   output: string;
+  toolCalls?: ToolCall[];
   usage: Usage;
   status: RouteStatus;
-  finishReason: 'stop' | 'length' | 'error' | 'cancelled';
+  finishReason: 'stop' | 'length' | 'tool_calls' | 'error' | 'cancelled';
   route: RouteDecision;
 }
 
@@ -212,5 +228,53 @@ export interface ResponseChunk {
   index: number;
   delta: string;
   done: boolean;
+  type?: 'text-delta' | 'tool-call-added' | 'tool-call-arguments-delta' | 'tool-call-done' | 'completed';
+  toolCallId?: string;
+  toolName?: string;
+  toolArguments?: Record<string, unknown>;
+  outputIndex?: number;
+  route?: RouteDecision;
   usage?: Usage;
+}
+
+export interface DecisionOutcome {
+  provider: string;
+  model: string;
+  status: RouteStatus;
+  finishReason?: ResponseResult['finishReason'];
+  usage?: Usage;
+}
+
+export interface DecisionAttempt {
+  index: number;
+  modelId: string;
+  model: string;
+  provider: string;
+  status: 'completed' | 'failed' | 'cancelled';
+  latencyMs: number;
+  startedAt: string;
+  completedAt: string;
+  errorCode?: string;
+  usage?: Usage;
+}
+
+export interface DecisionRejection {
+  code: string;
+  statusCode: number;
+  retryable: boolean;
+  candidates?: Rejection[];
+}
+
+export interface DecisionRecord {
+  id: string;
+  tenantId: string;
+  state: 'planned' | 'completed' | 'failed' | 'cancelled' | 'rejected';
+  route?: RouteDecision;
+  registryVersion?: number;
+  outcome?: DecisionOutcome;
+  rejection?: DecisionRejection;
+  attempts: DecisionAttempt[];
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
 }

@@ -1,17 +1,40 @@
 import type { ModelConfiguration } from '../domain/types.js';
 import { RouterError } from '../domain/errors.js';
-import type { ControlPlaneStore } from '../persistence/contracts.js';
+import type { ControlPlaneStore, CredentialStore } from '../persistence/contracts.js';
 import type { InMemoryModelRegistry } from '../registry/memory-registry.js';
-import type { RequestPrincipal } from '../security/auth.js';
+import type { ApiScope, RequestPrincipal } from '../security/auth.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from './promotion.js';
 import type { InMemoryRolloutRegistry, ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign } from '../shadow/shadow.js';
 import type { ShadowCoordinator } from '../shadow/coordinator.js';
+import { decodeAuditCursor, encodeAuditCursor } from './audit-pagination.js';
+import type { TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 export class ControlPlaneService {
-  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator) {}
+  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator, private readonly credentials?: CredentialStore, private readonly refreshCredentials?: () => Promise<void>, private readonly refreshPolicies?: () => Promise<void>) {}
 
   snapshot() { return this.registry.currentSnapshot(); }
+
+  async listCredentials() {
+    if (!this.credentials) throw new RouterError('Durable credential management requires PostgreSQL mode', 'credential_store_unavailable', 503, true);
+    return (await this.credentials.listCredentials()).map(({ keySha256: _keySha256, ...credential }) => credential);
+  }
+
+  async createCredential(input: { id: string; tenantId: string; keySha256: string; scopes: readonly ApiScope[] }, actor: RequestPrincipal) {
+    if (!this.credentials) throw new RouterError('Durable credential management requires PostgreSQL mode', 'credential_store_unavailable', 503, true);
+    const created = await this.credentials.createCredential({ ...input, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    await this.refreshCredentials?.();
+    const { keySha256: _keySha256, ...metadata } = created;
+    return metadata;
+  }
+
+  async disableCredential(id: string, actor: RequestPrincipal) {
+    if (!this.credentials) throw new RouterError('Durable credential management requires PostgreSQL mode', 'credential_store_unavailable', 503, true);
+    const disabled = await this.credentials.disableCredential({ id, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    await this.refreshCredentials?.();
+    const { keySha256: _keySha256, ...metadata } = disabled;
+    return metadata;
+  }
 
   async publishModels(models: readonly ModelConfiguration[], source: string, actor: RequestPrincipal) {
     if (models.length === 0) throw new RouterError('A registry snapshot must contain at least one model', 'invalid_request', 400, false);
@@ -37,6 +60,29 @@ export class ControlPlaneService {
     return this.registry.load(snapshot);
   }
 
+  async rollbackModels(targetVersion: number, expectedCurrentVersion: number, reason: string, actor: RequestPrincipal) {
+    const target = await this.store.registrySnapshot(targetVersion);
+    if (!target) throw new RouterError('Registry rollback target was not found', 'registry_snapshot_not_found', 404, false);
+    if (!target.models.some((model) => model.enabled)) throw new RouterError('Registry rollback target has no enabled model', 'invalid_rollback_target', 409, false);
+    const unavailable = target.models.find((model) => model.enabled && !this.availableProviders.has(model.provider));
+    if (unavailable) throw new RouterError(`Rollback target enables model '${unavailable.id}' on unavailable provider '${unavailable.provider}'`, 'invalid_rollback_target', 409, false);
+    const snapshot = await this.store.rollbackModels({ targetVersion, expectedCurrentVersion, reason, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    return this.registry.load(snapshot);
+  }
+
+  async disableModel(modelId: string, expectedCurrentVersion: number, reason: string, actor: RequestPrincipal) {
+    const snapshot = await this.store.disableModel({ modelId, expectedCurrentVersion, reason, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    return this.registry.load(snapshot);
+  }
+
+  tenantPolicy(tenantId: string) { return this.store.tenantPolicy(tenantId); }
+
+  async setTenantPolicy(tenantId: string, expectedVersion: number, reason: string, constraints: TenantPolicyConstraints, actor: RequestPrincipal) {
+    const policy = await this.store.setTenantPolicy({ ...constraints, tenantId, expectedVersion, reason, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    await this.refreshPolicies?.();
+    return policy;
+  }
+
   budgetFor(tenantId: string) { return this.store.budgetFor(tenantId); }
 
   setBudget(tenantId: string, limitUsd: number, actor: RequestPrincipal) {
@@ -44,6 +90,14 @@ export class ControlPlaneService {
   }
 
   listAudit(limit: number) { return this.store.listAudit(limit); }
+  verifyAudit() { return this.store.verifyAudit(); }
+
+  async listAuditPage(limit: number, cursor?: string) {
+    const rows = await this.store.listAudit(limit + 1, cursor ? decodeAuditCursor(cursor) : undefined);
+    const events = rows.slice(0, limit);
+    const last = events.at(-1);
+    return { events, nextCursor: rows.length > limit && last ? encodeAuditCursor(last) : null };
+  }
 
   submitEvidence(evidence: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'>, actor: RequestPrincipal) {
     return this.store.submitEvidence({ ...evidence, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });

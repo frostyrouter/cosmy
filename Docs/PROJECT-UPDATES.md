@@ -1,6 +1,137 @@
 # Project updates
 
+## 2026-08-17 - Tamper-evident administrative audit chain (commit pending)
+
+- Change: Added migration 016 to backfill and enforce a globally ordered SHA-256 predecessor chain across every PostgreSQL administrative audit event, plus authenticated `GET /v1/admin/audit/verify` integrity checks.
+- Atomicity/concurrency: All control-plane and credential audit writers now call one advisory-lock-serialized database function inside their existing mutation transaction, preventing concurrent chain forks while preserving mutation/audit all-or-nothing behavior.
+- Operations/security: Full verification detects content changes, gaps, insertion, reordering, and broken predecessor links and returns HTTP 409. The endpoint reports a head hash suitable for separately administered signed/WORM checkpoints; the database chain alone cannot defeat a superuser who recomputes the full history.
+- Files: PostgreSQL migration/function, audit store contract and implementations, admin service/route, corruption/migration/HTTP tests, and security/operator documentation.
+- Validation: 199 tests passed locally (26 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation. Both verification jobs and the real Compose/PostgreSQL smoke job passed on draft PR #14 at commit `8500c10`, covering empty and legacy-row migration, concurrent gap-free appends, content-corruption detection/restoration, and every existing administrative mutation path.
+- Migration: `pgcrypto` is required. Existing audit rows are updated in one migration transaction, so production operators must test runtime and WAL/storage impact on a representative copy and schedule an appropriate maintenance window.
+
+## 2026-08-17 - Provider bulkheads and bounded circuit recovery (commit pending)
+
+- Change: Added a zero-queue concurrency bulkhead around every provider and limited half-open circuit recovery to one probe, preventing slow/outage traffic from creating unbounded in-process work or a recovery stampede.
+- Runtime impact: Each provider receives an independent positive `PROVIDER_MAX_CONCURRENCY` cap (default 100). Saturated calls fail immediately with retryable `provider_saturated`, increment the same-named operational metric, and remain eligible for an already planned policy-compliant fallback. Permits cover retries and are released on every completion, error, cancellation, and early stream close.
+- Files: Provider resilience/error contracts, application/config/environment wiring, metrics, focused concurrency/stream/circuit/config tests, and reliability/operator documentation.
+- Validation: 198 tests passed locally (23 PostgreSQL integration tests skipped without a database), including HTTP 503/metric behavior, permit release, early stream termination, and half-open concurrency; TypeScript lint, production build, and diff whitespace validation passed. The 20,000-request benchmark completed with zero errors at about 643 requests/second and 126.933 ms p95 on this development host; deployment load testing remains the sizing authority. Both verification jobs and the real Compose/PostgreSQL smoke job passed on draft PR #14 at commit `e156943`.
+- Boundary: Limits are per process rather than distributed; deployment-wide capacity is replicas multiplied by the provider cap. Priority/fairness queues and automatic cap tuning remain outside this milestone.
+
+## 2026-08-17 - Cached OIDC workload identity (commit pending)
+
+- Change: Added signed JWT workload authentication behind the existing bearer-token API, composing it with bootstrap and durable API keys while mapping verified issuer subjects, tenants, and prefixed scopes into the existing principal contract.
+- Security/reliability: Verification pins the issuer, audience, asymmetric algorithms, required lifetime claims, optional token type, and a trusted HTTPS JWKS endpoint. Startup fails if keys cannot be bootstrapped; refresh is single-flight and preserves known-good keys only for a configured bounded stale window before failing closed. Unknown key IDs fail immediately and start a background refresh.
+- Latency/operations: Known-key requests verify against an in-memory JWKS without an identity-provider or database round trip. Added configuration, `oidc_jwks_refresh_failure`, a rotation/outage runbook, and `npm run bench:oidc`. Identity operators must overlap signing keys and should issue short-lived access tokens.
+- Files: Authentication contracts and HTTP callers, cached OIDC verifier, application/config wiring, metrics, environment example, unit/HTTP/config regressions, benchmark, and security/API/operator documentation.
+- Validation: 194 tests passed locally (23 PostgreSQL integration tests skipped without a database); TypeScript lint, production build, dependency-tree validation, diff whitespace validation, and a production dependency audit with zero known vulnerabilities passed. The isolated 10,000-verification benchmark completed with zero failures, one JWKS fetch, about 29,806 verifications/second, and 3.254 ms p95. The existing 20,000-request benchmark completed with zero errors at about 630 requests/second and 127.638 ms p95 on this development host; deployment load testing remains the release authority.
+- Boundary: Cosmy accepts signed JWT bearer tokens only; authorization-code flows, token issuance/refresh, opaque-token introspection, per-token revocation, DPoP/mTLS binding, and dynamic issuer discovery remain outside this milestone.
+
+## 2026-08-16 - Durable tenant policy bundles (commit pending)
+
+- Change: Added versioned PostgreSQL/in-memory tenant policies with admin read/replace endpoints, provider/model allow/deny controls, region/data-class boundaries, cost/latency/quality limits, and fallback control.
+- Invariant: Requests may only tighten operator policy—allowlists intersect, denylists union, maxima choose the lower value, quality chooses the higher value, and either side may disable fallback. Model discovery and explicit model routing use the same visibility rules.
+- Consistency: Local updates refresh immediately; peers poll at `POLICY_REFRESH_SECONDS` (default 2) with stale-refresh generation protection. Failures preserve the last-known-good snapshot and increment `policy_refresh_failure`.
+- Latency/evidence: The response path uses an in-memory tenant lookup and bounded set operations with no policy database read. Decisions include the tenant policy version for replay and audit correlation.
+- Persistence/security: Tenant-specific advisory locks and required `If-Match` prevent lost updates; `policy.set` audit commits in the same transaction. Migration 015 constrains stored values.
+- Validation: 185 tests passed locally (23 PostgreSQL integration tests skipped without a database), including resolution/non-relaxation, fail-closed class/region, model discovery, HTTP enforcement/version/reason/audit, config, and migration coverage; TypeScript lint, production build, and diff whitespace validation passed. A 20,000-request benchmark completed with zero errors at about 632 requests/second and 125.1 ms p95 on this development host; deployment load testing remains the release authority. Real-PostgreSQL concurrency and cross-instance convergence coverage is included for Compose CI.
+
+## 2026-08-16 - Emergency model disable (commit pending)
+
+- Change: Added `POST /v1/admin/models/disable` as a targeted incident kill switch that creates a new registry snapshot while changing only the selected model's `enabled` lifecycle flag.
+- Safety: The operation requires current-version `If-Match`, serializes with publication and rollback, rejects missing models and stale commands, treats an already-disabled current model as an idempotent no-op, and cannot disable the last enabled model.
+- Audit: PostgreSQL commits `models.disable` with model identity, provider, previous version, and operator reason in the same transaction as the copied manifests. Migration 014 extends the constrained action set.
+- Runtime/latency: The local router activates the committed snapshot immediately and peers use existing polling. There is no added database call or computation on response routing.
+- Validation: 181 tests passed locally (22 PostgreSQL integration tests skipped without a database), including HTTP routing exclusion and stale/idempotent/last-model behavior; TypeScript lint, production build, and diff whitespace validation passed. Real-PostgreSQL concurrent-disable and last-model coverage is included for Compose CI.
+
+## 2026-08-16 - Atomic model-registry rollback (commit pending)
+
+- Change: Added `POST /v1/admin/models/rollback` to restore a prior durable registry snapshot as a new monotonic version, with immediate local activation and normal cross-instance registry convergence.
+- Safety: Rollback requires `If-Match` with the current version, rejects current/future/missing targets and unavailable enabled providers, and serializes against publication so duplicate or stale incident commands cannot overwrite newer state.
+- Audit: PostgreSQL copies target manifests and commits `models.rollback` with target/previous version, operator reason, and model count in the same transaction. Migration 013 extends the constrained audit action set.
+- Latency: This is an administrative-only database workflow and adds no work to request routing, provider execution, or authentication.
+- Validation: 180 tests passed locally (21 PostgreSQL integration tests skipped without a database), including HTTP precondition/stale-retry/history restoration; TypeScript lint, production build, and diff whitespace validation passed. Real-PostgreSQL concurrent rollback and atomic-audit coverage is included for Compose CI.
+
+## 2026-08-16 - Stable administrative audit pagination (commit pending)
+
+- Change: `GET /v1/admin/audit` now returns a nullable opaque `nextCursor` and accepts that cursor to traverse the complete administrative history beyond the former newest-500 ceiling.
+- Correctness: Memory and PostgreSQL stores use the same descending `(occurredAt, id)` keyset order, avoiding offset drift when new mutations arrive between pages. Cursors are versioned, canonical base64url payloads with strict size, UUID, timestamp, and shape validation.
+- Latency: Pagination is isolated to the administrative control plane and uses the existing PostgreSQL audit index/order; it adds no work to message routing or request authentication.
+- Validation: 179 tests passed locally (20 PostgreSQL integration tests skipped without a database), including cursor round-trip/rejection and HTTP multi-page/no-duplicate behavior; TypeScript lint, production build, and diff whitespace validation passed. Real-PostgreSQL gap-free traversal coverage is included for Compose CI.
+
+## 2026-08-16 - Durable credential lifecycle (commit pending)
+
+- Change: Added audited PostgreSQL credential creation/listing/revocation, an atomically reloadable in-memory authenticator, immediate local refresh, and bounded cross-instance polling without a database lookup on request authentication.
+- Security: The API accepts and stores only SHA-256 digests, redacts digests from admin responses, validates scopes/identifiers in both API and SQL, and serializes admin revocation so concurrent requests cannot disable every durable `admin:write` key.
+- Reliability: Exact create and disable retries are idempotent; refresh failures preserve the prior known-good snapshot and increment `credential_refresh_failure`, while refresh generations prevent a slow stale query from overwriting a newer snapshot. Static bootstrap keys remain configuration-owned and require a final restart to remove.
+- Operations: Apply migration 012, set `CREDENTIAL_REFRESH_SECONDS` (default 2), create two durable admins before removing bootstrap configuration, and generate/distribute high-entropy plaintext keys outside Cosmy.
+- Validation: 176 tests passed locally (19 PostgreSQL integration tests skipped without a database), including reload/rotation/revocation/admin redaction/config/migration coverage; TypeScript lint, production build, and diff whitespace validation passed. Real PostgreSQL concurrency, idempotency, and cross-instance revocation tests are included for Compose CI.
+- Remaining boundary: Cross-instance revocation is polling-bounded rather than push-immediate; OAuth/workload identity remains future work.
+- CI correction: The first Compose run showed that migration 012 created credential audit events without extending PostgreSQL's existing audit-action constraint. Migration 012 now replaces the constraint with the complete action set, and migration coverage asserts both credential actions are present.
+
+## 2026-08-12 - Complete routing decision evidence (commit pending)
+
+- Change: Added route-less durable records for semantic/routing rejections and ordered, privacy-safe candidate attempt history for completion, failure, cancellation, validation fallback, and streaming fallback.
+- Reliability: Provider streams that end without a terminal event now fail and may fall back before visible output instead of being falsely recorded as completed.
+- Privacy/latency: Attempts retain normalized model/provider/status/latency/error/usage data but no prompts, outputs, raw provider errors, credentials, or provider request IDs. They reuse the terminal decision update rather than adding a database write per fallback.
+- Operations: Apply migration 011. Malformed transport/schema requests and authentication/rate-limit failures remain pre-routing admission telemetry, not routing decisions. Candidate history aggregates provider-internal retries.
+- Validation: 174 tests passed locally (17 PostgreSQL tests skipped without a database), plus TypeScript lint, production build, diff whitespace validation, and a 20,000-request benchmark with zero errors. The benchmark produced about 624 requests/second and 126.5 ms p95 on this development host; repeated samples showed substantial host contention, so deployment load testing—not this laptop result—remains the latency release gate. Real-PostgreSQL rejection/attempt coverage is included for CI.
+- Limitation: A process crash after provider work but before the terminal decision update leaves the planned route but cannot reconstruct in-memory attempt history; per-attempt synchronous writes were intentionally avoided on the latency-sensitive path.
+- CI correction: The PostgreSQL behavior and migration passed, but the first Compose run exposed a test matcher that expected an omitted optional `route` property to exist as `undefined`. The assertion now verifies absence separately, matching the serialized API contract.
+
+## 2026-08-12 - Shared PostgreSQL provider health (commit pending)
+
+- Change: Added an atomic provider-health aggregate, asynchronous event persistence on a dedicated bounded pool, and periodic cross-instance snapshot refresh while preserving immediate local routing feedback.
+- Impact: Horizontally scaled PostgreSQL deployments now learn provider failures and recovery from one another without adding a database round trip to the provider response path.
+- Operations: Apply migration 010, keep `HEALTH_REFRESH_SECONDS` above zero for multiple instances, alert on `health_store_failure`, and define retention for append-only health events.
+- Validation: 170 tests passed (16 PostgreSQL tests skipped without a local database), including a stale-refresh race regression; TypeScript lint, production build, diff validation, and a 20,000-request benchmark passed with zero errors (about 695 requests/second and 112.6 ms p95 on the development machine). A real-PostgreSQL cross-instance test is included for CI.
+- Limitations and follow-up: Convergence is eventually consistent (default polling window two seconds), failed asynchronous events are not replayed automatically, and production load/fault testing remains required.
+
 This file is the shared implementation record for the Cosmy router. New feature and change entries must follow the rules in [`agent.md`](../agent.md).
+
+## 2026-08-12 - End-to-end routing and first-event deadlines (commit pending)
+
+- Change: Moved the overall request deadline to service admission so it includes semantic classification, routing, planned-decision persistence, provider fallback/retries, and completion or streaming time to first canonical event.
+- Semantics: Non-streaming and pre-output streaming deadline expiry return retryable HTTP 504 `timeout`; caller cancellation stays distinct. Streaming releases the timer after its first visible text/tool event so long valid streams are not truncated.
+- Audit: A timed-out request with a planned route persists terminal `errorCode: timeout` instead of being misclassified as a client cancellation. Pre-route classifier timeouts now persist route-less rejected decisions.
+- Files: Service deadline composition, application wiring, classifier/HTTP/audit regressions, and runtime documentation.
+- Validation: 168 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Store operations without cancellation rely on their own bounded query timeouts; the overall timer cannot forcibly interrupt an arbitrary non-cooperative promise.
+
+## 2026-08-12 - Stateless tool-result continuation (commit pending)
+
+- Change: Extended canonical messages with assistant tool-call history and matched tool-result messages, then translated full stateless continuation histories for OpenAI, Anthropic, and Gemini while preserving call IDs and explicit tool errors.
+- Safety: Requests fail before routing/provider work on undeclared tools, duplicate or unknown call IDs, name mismatches, incomplete parallel results, invalid ordering, or role-incompatible fields. Tool results stay in native result containers and are excluded from semantic classifier input and shadow execution.
+- Accuracy: Tool-call arguments and result content count toward context/cost estimation even though untrusted tool output cannot steer semantic classification.
+- Files: Request/domain schema, conversation validator, service admission, provider request adapters, feature extraction, provider/HTTP regressions, and client workflow documentation.
+- Validation: 166 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Execution remains client-owned. Cosmy does not authorize or run tools, and provider-private thought signatures/hosted-tool state are not portable in this stateless subset.
+
+## 2026-08-12 - Provider-neutral tool calls and typed streams (commit pending)
+
+- Change: Normalized OpenAI function calls, Anthropic tool-use blocks, and Gemini function calls into stable `{ id, name, arguments }` response objects with `finishReason: tool_calls`; fragmented and parallel tool-call streams now preserve call identity and output indexes.
+- API: Replaced generic `delta`/`done` SSE names with typed response lifecycle, route, text, tool, usage, completion, and failure events carrying one response ID and monotonic sequence numbers. Existing non-streaming text output remains backward-compatible.
+- Reliability: Any observed tool event now blocks unsafe streaming fallback just like visible text. Terminal streaming decisions record the provider/model that actually served a fallback instead of the originally planned primary.
+- Files: Canonical domain/provider contracts, OpenAI/Anthropic/Gemini/simulator adapters, executor, service/audit persistence, HTTP/SSE encoding, response schema, tests, and protocol documentation.
+- Validation: 161 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Cosmy returns client-executed function calls but does not yet run tools or provide a first-class tool-result continuation item. Provider-hosted tools and managed tool loops remain follow-up work.
+
+## 2026-08-12 - Live health admission and structured-output enforcement (commit pending)
+
+- Change: Connected execution health observations back into routing. Three consecutive failures temporarily reject a model with `observed_health_unavailable`; successful probes restore it, and explicit unhealthy model requests fail instead of silently changing models.
+- Change: Added deterministic non-streaming JSON-schema verification and validation-driven fallback. Invalid outputs are reconciled at actual cost, do not poison transport health, and can escalate only through pre-ranked eligible alternatives while staying within the request's total `maxCostUsd` ceiling. Unsupported schema keywords fail before provider execution.
+- Impact: Repeatedly failing providers stop receiving fresh automatic traffic, and a provider can no longer return malformed or schema-incompatible output as a successful structured response.
+- Files: Health store contracts/implementation, router composition and admission, executor/error contracts, structured-output validator, regressions, and operator documentation.
+- Validation: 154 tests passed (15 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation.
+- Boundary: Health remains process-local and uses configured p95 latency as its percentile baseline. Post-generation validation cannot safely replay an already emitted stream; streaming schema enforcement remains provider-native. `$ref`, conditional schemas, formats, and other unsupported JSON Schema vocabulary are rejected rather than partially enforced.
+
+## 2026-08-12 - Durable routing decisions and query APIs
+
+- Change: Added tenant-scoped planned and terminal decision records plus `GET /v1/routing/decisions/:id`, deterministic non-executing `POST /v1/routing/simulate`, and rollout-visible `GET /v1/models` APIs behind the new `routing:read` scope.
+- Privacy and reliability: Records contain route features, model metadata, versions, rejection reasons, and content-free outcomes; they exclude prompts, outputs, credentials, request metadata, and provider payloads. PostgreSQL planned writes fail before billable work, while terminal-update failures preserve the provider result and emit `decision_store_failure`.
+- Persistence: Migration 009 adds tenant-keyed PostgreSQL decision storage; development mode uses a bounded in-memory implementation.
+- Files: Domain and persistence contracts, memory/PostgreSQL stores, router service, public HTTP/auth configuration, migrations, exports, documentation, and tenant/privacy/API regressions.
+- Validation: TypeScript lint, unit/HTTP suite, migration coverage, production build, and real PostgreSQL tenant-isolation integration are required before merge.
+- Boundary: Request IDs must currently be unique per tenant; pre-route rejections, retention cleanup, pagination/export, and detailed streaming fallback histories remain follow-up work.
 
 ## 2026-08-12 - Configuration and rollout contention hardening (PR #12 follow-up)
 

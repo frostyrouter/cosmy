@@ -8,7 +8,7 @@ import { InMemoryHealthStore } from './stores/memory-health-store.js';
 import { configuredClassifier, configuredModelManifests, configuredProviders } from './providers/configured.js';
 import { DeterministicRouter } from './routing/router.js';
 import { RequestExecutor } from './execution/executor.js';
-import { resilientProviders } from './execution/resilience.js';
+import { bulkheadProviders, resilientProviders } from './execution/resilience.js';
 import { RouterService } from './service/router-service.js';
 import { registerRoutes } from './api/http.js';
 import { registerAdminRoutes } from './api/admin-http.js';
@@ -17,18 +17,23 @@ import { InMemoryMetrics } from './observability/metrics.js';
 import { resolveConfig, type AppConfigInput } from './config.js';
 import type { ProviderAdapter } from './ports/provider.js';
 import type { RequestClassifier } from './ports/classifier.js';
-import type { BudgetAdministration, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
+import type { BudgetAdministration, HealthSnapshotStore, HealthStore, ModelRegistry, UsageLedger } from './ports/stores.js';
 import type { MetricsSink } from './observability/metrics.js';
 import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlClient } from './persistence/postgres.js';
-import { PostgresControlPlaneStore, PostgresIdempotencyStore, PostgresRegistryRepository, PostgresReservationRepository } from './persistence/sql-adapters.js';
+import { PostgresControlPlaneStore, PostgresDecisionStore, PostgresIdempotencyStore, PostgresRegistryRepository, PostgresReservationRepository } from './persistence/sql-adapters.js';
+import { PostgresHealthStore } from './persistence/postgres-health-store.js';
+import { PostgresCredentialStore } from './persistence/postgres-credentials.js';
 import { InMemoryResponseCache } from './persistence/memory-cache.js';
 import { InMemoryIdempotencyStore } from './persistence/memory-idempotency.js';
-import { sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
+import { InMemoryDecisionStore } from './persistence/memory-decisions.js';
+import { CompositeRequestAuthenticator, ReloadableApiKeyAuthenticator, sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
+import { CachedOidcAuthenticator, type OidcFetcher } from './security/oidc-auth.js';
 import { InMemoryControlPlaneStore } from './control-plane/memory-store.js';
 import { ControlPlaneService } from './control-plane/service.js';
 import { InMemoryRolloutRegistry, type RolloutOutcome } from './rollouts/rollout.js';
-import type { ControlPlaneStore } from './persistence/contracts.js';
+import type { ControlPlaneStore, CredentialStore } from './persistence/contracts.js';
 import { ShadowCoordinator } from './shadow/coordinator.js';
+import { ReloadableTenantPolicyResolver } from './policy/tenant-policy.js';
 
 export interface AppDependencies {
   registry?: ModelRegistry;
@@ -39,7 +44,10 @@ export interface AppDependencies {
   cache?: import('./persistence/contracts.js').ResponseCache;
   authenticator?: RequestAuthenticator;
   idempotency?: import('./persistence/contracts.js').IdempotencyStore;
+  decisions?: import('./persistence/contracts.js').DecisionStore;
+  credentials?: import('./persistence/contracts.js').CredentialStore;
   classifier?: RequestClassifier | null;
+  oidcFetcher?: OidcFetcher;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -52,6 +60,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   const classifierMode = config.classifierMode ?? (config.environment === 'production' ? 'fail' : availableClassifier ? 'degrade' : 'disabled');
   const classifier = classifierMode === 'disabled' ? undefined : availableClassifier;
   const app = Fastify({ logger: { level: config.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
+  const metrics = dependencies.metrics ?? new InMemoryMetrics();
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
     try { done(null, JSON.parse(String(body))); } catch { done(Object.assign(new Error('Invalid JSON body'), { statusCode: 400 })); }
   });
@@ -59,14 +68,17 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
   if (rateLimitMax > 0) await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
   const configuredCredentials = config.apiCredentials ?? (config.apiKey ? [{ id: 'legacy', tenantId: 'default', keySha256: sha256ApiKey(config.apiKey), scopes: ['responses:create' as const] }] : []);
-  const authenticator = dependencies.authenticator ?? (configuredCredentials.length ? new StaticApiKeyAuthenticator(configuredCredentials) : undefined);
-  if (config.environment === 'production' && !config.allowUnauthenticated && !authenticator) {
-    throw new Error('Production requires COSMY_API_CREDENTIALS or explicit ALLOW_UNAUTHENTICATED=true');
-  }
-  if (classifierMode === 'fail' && !availableClassifier) throw new Error('DEEPSEEK_API_KEY is required when CLASSIFIER_MODE=fail');
+  let authenticator = dependencies.authenticator;
+  let reloadableAuthenticator: ReloadableApiKeyAuthenticator | undefined;
+  let credentialStore: CredentialStore | undefined = dependencies.credentials;
+  let refreshCredentials: (() => Promise<void>) | undefined;
+  let credentialRefreshGeneration = 0;
+  let oidcAuthenticator: CachedOidcAuthenticator | undefined;
   let postgres: PostgresSqlClient | undefined;
   let rolloutPostgres: PostgresSqlClient | undefined;
   let shadowPostgres: PostgresSqlClient | undefined;
+  let healthPostgres: PostgresSqlClient | undefined;
+  let sharedHealth: PostgresHealthStore | undefined;
   let registryRepository: PostgresRegistryRepository | undefined;
   let reservationRecovery: PostgresReservationRepository | undefined;
   let reservationHeartbeatMs = 30_000;
@@ -77,13 +89,55 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
       await applyControlPlaneMigration(postgres);
       rolloutPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 100, queryTimeoutMs: 200, connectionTimeoutMs: 200 });
       shadowPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 2_000, queryTimeoutMs: 3_000, connectionTimeoutMs: 500 });
+      if (!dependencies.health) healthPostgres = await createPostgresSqlClient(config.databaseUrl, { maxConnections: 4, statementTimeoutMs: 1_000, queryTimeoutMs: 1_500, connectionTimeoutMs: 500 });
     } catch (error) {
+      await healthPostgres?.close();
+      await shadowPostgres?.close();
       await rolloutPostgres?.close();
       await postgres.close();
       throw error;
     }
-    app.addHook('onClose', async () => { await shadowPostgres?.close(); await rolloutPostgres?.close(); await postgres?.close(); });
+    app.addHook('onClose', async () => { await sharedHealth?.flush(); await healthPostgres?.close(); await shadowPostgres?.close(); await rolloutPostgres?.close(); await postgres?.close(); });
   }
+  if (!authenticator && postgres) {
+    credentialStore ??= new PostgresCredentialStore(postgres);
+    reloadableAuthenticator = new ReloadableApiKeyAuthenticator(configuredCredentials);
+    const durableCredentials = credentialStore;
+    const liveAuthenticator = reloadableAuthenticator;
+    refreshCredentials = async () => {
+      const generation = ++credentialRefreshGeneration;
+      const credentials = await durableCredentials.listCredentials();
+      if (generation === credentialRefreshGeneration) liveAuthenticator.replaceDynamic(credentials);
+    };
+    await refreshCredentials();
+    if (reloadableAuthenticator.enabledCredentialCount > 0) authenticator = reloadableAuthenticator;
+  } else if (!authenticator && configuredCredentials.length) authenticator = new StaticApiKeyAuthenticator(configuredCredentials);
+  if (!refreshCredentials && credentialStore && authenticator instanceof ReloadableApiKeyAuthenticator) {
+    const durableCredentials = credentialStore;
+    const liveAuthenticator = authenticator;
+    refreshCredentials = async () => {
+      const generation = ++credentialRefreshGeneration;
+      const credentials = await durableCredentials.listCredentials();
+      if (generation === credentialRefreshGeneration) liveAuthenticator.replaceDynamic(credentials);
+    };
+    await refreshCredentials();
+  }
+  if (config.oidcIssuer && config.oidcAudience && config.oidcJwksUri) {
+    oidcAuthenticator = new CachedOidcAuthenticator({
+      issuer: config.oidcIssuer, audience: config.oidcAudience, jwksUri: config.oidcJwksUri, algorithms: config.oidcAlgorithms ?? ['RS256'],
+      tenantClaim: config.oidcTenantClaim ?? 'tenant_id', scopeClaim: config.oidcScopeClaim ?? 'scope', scopePrefix: config.oidcScopePrefix ?? 'cosmy:',
+      maximumTokenAgeSeconds: config.oidcMaximumTokenAgeSeconds ?? 3_600, clockToleranceSeconds: config.oidcClockToleranceSeconds ?? 5,
+      maximumJwksStaleSeconds: config.oidcMaximumJwksStaleSeconds ?? 86_400, requestTimeoutMs: config.oidcRequestTimeoutMs ?? 2_000,
+      ...(config.oidcTokenType ? { tokenType: config.oidcTokenType } : {}),
+    }, dependencies.oidcFetcher, () => metrics.increment?.('oidc_jwks_refresh_failure'));
+    try { await oidcAuthenticator.refresh(); } catch (error) { await app.close(); throw new Error('OIDC JWKS bootstrap failed', { cause: error }); }
+    authenticator = authenticator ? new CompositeRequestAuthenticator([authenticator, oidcAuthenticator]) : oidcAuthenticator;
+  }
+  if (config.environment === 'production' && !config.allowUnauthenticated && !authenticator) {
+    await app.close();
+    throw new Error('Production requires an enabled durable or bootstrap API credential, or explicit ALLOW_UNAUTHENTICATED=true');
+  }
+  if (classifierMode === 'fail' && !availableClassifier) { await app.close(); throw new Error('DEEPSEEK_API_KEY is required when CLASSIFIER_MODE=fail'); }
   const seedModels = [...defaultModels, ...configuredModelManifests(runtimeEnv)];
   let registry = dependencies.registry;
   if (!registry && postgres) {
@@ -108,15 +162,28 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   if (!cache && config.cacheMode === 'memory') {
     cache = new InMemoryResponseCache();
   }
-  const health = dependencies.health ?? new InMemoryHealthStore();
-  const metrics = dependencies.metrics ?? new InMemoryMetrics();
+  let health = dependencies.health;
+  if (!health && healthPostgres) {
+    sharedHealth = new PostgresHealthStore(healthPostgres, () => metrics.increment?.('health_store_failure'));
+    await sharedHealth.refresh();
+    health = sharedHealth;
+  }
+  health ??= new InMemoryHealthStore();
   registerMetricsRoute(app, metrics, authenticator);
-  const providers = resilientProviders(configuredProviders(runtimeEnv, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
-  const providerAdapters = dependencies.providers ?? providers;
+  const providers = dependencies.providers ?? resilientProviders(configuredProviders(runtimeEnv, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
+  const providerAdapters = bulkheadProviders(providers, config.providerMaxConcurrency, metrics);
   const rolloutRegistry = new InMemoryRolloutRegistry();
   const controlStore: ControlPlaneStore | undefined = registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))
     ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres, shadowPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
     : undefined;
+  const tenantPolicies = new ReloadableTenantPolicyResolver();
+  let policyRefreshGeneration = 0;
+  const refreshPolicies = controlStore ? async () => {
+    const generation = ++policyRefreshGeneration;
+    const snapshot = await controlStore.listTenantPolicies();
+    if (generation === policyRefreshGeneration) tenantPolicies.replace(snapshot);
+  } : undefined;
+  await refreshPolicies?.();
   if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
   const shadowCoordinator = controlStore ? new ShadowCoordinator(controlStore, registry, providerAdapters, metrics, 4, 1_000, Math.min(config.requestTimeoutMs, 30_000)) : undefined;
   if (shadowCoordinator && controlStore) shadowCoordinator.load(await controlStore.activeShadowCampaigns());
@@ -125,6 +192,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     classifierTimeoutMs: config.classifierTimeoutMs ?? 3_000,
     failureMode: classifierMode === 'fail' ? 'fail' : 'degrade',
     admission: rolloutRegistry,
+    ...(isHealthSnapshotStore(health) ? { health } : {}),
   });
   const rolloutObserver = controlStore ? {
     recordOutcome: async (outcome: RolloutOutcome) => {
@@ -144,7 +212,8 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     : undefined;
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator), readyCheck, authenticator);
+  const decisions = dependencies.decisions ?? (postgres ? new PostgresDecisionStore(postgres) : new InMemoryDecisionStore());
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator, decisions, config.requestTimeoutMs), readyCheck, authenticator, tenantPolicies);
   registerDiagnosticsRoute(app, async () => {
     const current = (registry as { currentSnapshot?: () => { version: number; source: string; createdAt: string } }).currentSnapshot?.();
     const models = registry.snapshot();
@@ -157,7 +226,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     };
   }, authenticator);
   if (controlStore && registry instanceof InMemoryModelRegistry) {
-    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name)), rolloutRegistry, shadowCoordinator), authenticator);
+    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name)), rolloutRegistry, shadowCoordinator, credentialStore, refreshCredentials, refreshPolicies), authenticator);
   }
   if (registryRepository && registry instanceof InMemoryModelRegistry) {
     const refreshSeconds = config.registryRefreshSeconds ?? 15;
@@ -170,6 +239,50 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
           if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
           if (controlStore && shadowCoordinator) shadowCoordinator.load(await controlStore.activeShadowCampaigns());
         }).catch((error: unknown) => { metrics.increment?.('registry_refresh_failure'); app.log.error({ err: error }, 'registry refresh failed'); });
+      }, refreshSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
+  if (sharedHealth) {
+    const refreshSeconds = config.healthRefreshSeconds ?? 2;
+    if (refreshSeconds > 0) {
+      const durableHealth = sharedHealth;
+      const timer = setInterval(() => {
+        void durableHealth.refresh().catch((error: unknown) => app.log.error({ err: error }, 'provider health refresh failed'));
+      }, refreshSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
+  if (refreshCredentials) {
+    const refreshSeconds = config.credentialRefreshSeconds ?? 2;
+    if (refreshSeconds > 0) {
+      const refresh = refreshCredentials;
+      const timer = setInterval(() => {
+        void refresh().catch((error: unknown) => { metrics.increment?.('credential_refresh_failure'); app.log.error({ err: error }, 'credential refresh failed'); });
+      }, refreshSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
+  if (refreshPolicies) {
+    const refreshSeconds = config.policyRefreshSeconds ?? 2;
+    if (refreshSeconds > 0) {
+      const refresh = refreshPolicies;
+      const timer = setInterval(() => {
+        void refresh().catch((error: unknown) => { metrics.increment?.('policy_refresh_failure'); app.log.error({ err: error }, 'tenant policy refresh failed'); });
+      }, refreshSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
+  if (oidcAuthenticator) {
+    const refreshSeconds = config.oidcJwksRefreshSeconds ?? 300;
+    if (refreshSeconds > 0) {
+      const oidc = oidcAuthenticator;
+      const timer = setInterval(() => {
+        void oidc.refresh().catch((error: unknown) => { metrics.increment?.('oidc_jwks_refresh_failure'); app.log.error({ err: error }, 'OIDC JWKS refresh failed'); });
       }, refreshSeconds * 1_000);
       timer.unref();
       app.addHook('onClose', async () => { clearInterval(timer); });
@@ -201,4 +314,8 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
 function isBudgetAdministration(usage: UsageLedger): usage is UsageLedger & BudgetAdministration {
   const candidate = usage as Partial<BudgetAdministration>;
   return typeof candidate.budgetFor === 'function' && typeof candidate.setBudget === 'function';
+}
+
+function isHealthSnapshotStore(health: HealthStore): health is HealthSnapshotStore {
+  return typeof (health as Partial<HealthSnapshotStore>).snapshot === 'function';
 }

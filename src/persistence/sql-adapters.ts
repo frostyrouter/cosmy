@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { ModelConfiguration, ResponseResult } from '../domain/types.js';
+import type { DecisionRecord, ModelConfiguration, ResponseResult } from '../domain/types.js';
 import type { BudgetSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
-import type { AuditEvent, ControlPlaneStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
+import type { AuditEvent, AuditPosition, ControlPlaneStore, DecisionStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
+import type { TenantPolicyBundle, TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
 export interface SqlClient {
@@ -20,9 +21,11 @@ interface UsageTotalsRow { reserved_usd: string | number; spent_usd: string | nu
 interface BudgetRow { tenant_id: string; limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; }
 interface IdempotencyRow { request_hash: string; status: 'processing' | 'completed'; response_json: ResponseResult | null; }
 interface AuditRow { id: string; actor_credential_id: string; actor_tenant_id: string; action: AuditEvent['action']; target: string; details: Record<string, unknown>; occurred_at: string; }
+interface TenantPolicyRow { tenant_id: string; version: string | number; allowed_providers: string[] | null; denied_providers: string[] | null; allowed_models: string[] | null; denied_models: string[] | null; allowed_regions: string[] | null; allowed_data_classes: TenantPolicyBundle['allowedDataClasses'] | null; max_cost_usd: string | number | null; max_latency_ms: string | number | null; min_quality: string | number | null; allow_fallback: boolean | null; created_at: string | Date; updated_at: string | Date; }
 interface EvidenceRow { id: string; model_id: string; model_version: string; suite_version: string; dataset_version: string; conformance_passed: boolean; pricing_verified: boolean; usage_verified: boolean; routing_pass_rate: number; quality_score: number; sample_count: number; evaluated_at: string; expires_at: string; submitted_by_credential_id: string; submitted_at: string; }
 interface RolloutRow { id: string; model_id: string; model_version: string; state: ModelRollout['state']; traffic_percentage: number; minimum_samples: number; maximum_error_rate: number; maximum_average_latency_ms: number; sample_count: string | number; error_count: string | number; total_latency_ms: number; reason: string | null; created_at: string; updated_at: string; }
 interface ShadowCampaignRow { id: string; model_id: string; model_version: string; state: ShadowCampaign['state']; sample_percentage: number; budget_limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; allowed_data_classes: ShadowCampaign['allowedDataClasses']; sample_count: string | number; success_count: string | number; error_count: string | number; created_at: string; updated_at: string; }
+interface DecisionRow { decision_id: string; tenant_id: string; state: DecisionRecord['state']; route: DecisionRecord['route'] | null; registry_version: string | number | null; outcome: DecisionRecord['outcome'] | null; rejection: DecisionRecord['rejection'] | null; attempts: DecisionRecord['attempts'] | null; error_code: string | null; created_at: string; updated_at: string; }
 
 const rolloutContentionAttempts = 6;
 
@@ -38,6 +41,30 @@ function rolloutBackoff(attempt: number): Promise<void> {
 
 function snapshot(row: SnapshotRow, models: readonly ModelConfiguration[]): RegistrySnapshot {
   return { version: Number(row.version), source: row.source, createdAt: new Date(row.created_at).toISOString(), models };
+}
+
+function decisionRecord(row: DecisionRow): DecisionRecord {
+  return {
+    id: row.decision_id, tenantId: row.tenant_id, state: row.state, ...(row.route ? { route: row.route } : {}), attempts: row.attempts ?? [],
+    ...(row.registry_version === null ? {} : { registryVersion: Number(row.registry_version) }),
+    ...(row.outcome ? { outcome: row.outcome } : {}), ...(row.rejection ? { rejection: row.rejection } : {}), ...(row.error_code ? { errorCode: row.error_code } : {}),
+    createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+const decisionColumns = 'decision_id, tenant_id, state, route, registry_version, outcome, rejection, attempts, error_code, created_at, updated_at';
+
+export class PostgresDecisionStore implements DecisionStore {
+  constructor(private readonly db: SqlClient) {}
+
+  async save(record: DecisionRecord): Promise<void> {
+    await this.db.query(`INSERT INTO route_decisions (decision_id, tenant_id, state, route, registry_version, outcome, rejection, attempts, error_code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (tenant_id, decision_id) DO UPDATE SET state = EXCLUDED.state, route = EXCLUDED.route, registry_version = EXCLUDED.registry_version, outcome = EXCLUDED.outcome, rejection = EXCLUDED.rejection, attempts = EXCLUDED.attempts, error_code = EXCLUDED.error_code, updated_at = EXCLUDED.updated_at`, [record.id, record.tenantId, record.state, record.route ? JSON.stringify(record.route) : null, record.registryVersion ?? null, record.outcome ? JSON.stringify(record.outcome) : null, record.rejection ? JSON.stringify(record.rejection) : null, JSON.stringify(record.attempts), record.errorCode ?? null, record.createdAt, record.updatedAt]);
+  }
+
+  async get(tenantId: string, decisionId: string): Promise<DecisionRecord | undefined> {
+    const result = await this.db.query<DecisionRow>(`SELECT ${decisionColumns} FROM route_decisions WHERE tenant_id = $1 AND decision_id = $2`, [tenantId, decisionId]);
+    return result.rows[0] ? decisionRecord(result.rows[0]) : undefined;
+  }
 }
 
 export class PostgresRegistryRepository implements RegistryRepository {
@@ -152,6 +179,19 @@ function auditEvent(row: AuditRow): AuditEvent {
   };
 }
 
+function tenantPolicy(row: TenantPolicyRow): TenantPolicyBundle {
+  return {
+    tenantId: row.tenant_id, version: Number(row.version), createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+    ...(row.allowed_providers ? { allowedProviders: [...row.allowed_providers] } : {}), ...(row.denied_providers ? { deniedProviders: [...row.denied_providers] } : {}),
+    ...(row.allowed_models ? { allowedModels: [...row.allowed_models] } : {}), ...(row.denied_models ? { deniedModels: [...row.denied_models] } : {}),
+    ...(row.allowed_regions ? { allowedRegions: [...row.allowed_regions] } : {}), ...(row.allowed_data_classes ? { allowedDataClasses: [...row.allowed_data_classes] } : {}),
+    ...(row.max_cost_usd === null ? {} : { maxCostUsd: Number(row.max_cost_usd) }), ...(row.max_latency_ms === null ? {} : { maxLatencyMs: Number(row.max_latency_ms) }),
+    ...(row.min_quality === null ? {} : { minQuality: Number(row.min_quality) }), ...(row.allow_fallback === null ? {} : { allowFallback: row.allow_fallback }),
+  };
+}
+
+const tenantPolicyColumns = 'tenant_id, version, allowed_providers, denied_providers, allowed_models, denied_models, allowed_regions, allowed_data_classes, max_cost_usd, max_latency_ms, min_quality, allow_fallback, created_at, updated_at';
+
 function promotionEvidence(row: EvidenceRow): ModelPromotionEvidence {
   return {
     id: row.id, modelId: row.model_id, modelVersion: row.model_version, suiteVersion: row.suite_version, datasetVersion: row.dataset_version,
@@ -204,6 +244,77 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  async registrySnapshot(version: number): Promise<RegistrySnapshot | undefined> {
+    const result = await this.db.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots WHERE version = $1', [version]);
+    const row = result.rows[0];
+    if (!row) return undefined;
+    const manifests = await this.db.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = $1 ORDER BY model_id', [version]);
+    return snapshot(row, manifests.rows.map((entry) => entry.manifest));
+  }
+
+  async rollbackModels(input: { targetVersion: number; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:registry-publish'))");
+      const current = (await tx.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots ORDER BY version DESC LIMIT 1')).rows[0];
+      if (!current || Number(current.version) !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying rollback', 'registry_version_conflict', 409, false);
+      if (input.targetVersion >= Number(current.version)) throw new RouterError('Rollback target must be older than the current registry version', 'invalid_rollback_target', 409, false);
+      const target = (await tx.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots WHERE version = $1', [input.targetVersion])).rows[0];
+      if (!target) throw new RouterError('Registry rollback target was not found', 'registry_snapshot_not_found', 404, false);
+      const manifests = await tx.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = $1 ORDER BY model_id', [input.targetVersion]);
+      if (manifests.rows.length === 0) throw new RouterError('Registry rollback target has no manifests', 'invalid_rollback_target', 409, false);
+      const inserted = (await tx.query<SnapshotRow>('INSERT INTO model_registry_snapshots (source) VALUES ($1) RETURNING version, source, created_at', [`rollback:${input.targetVersion}`])).rows[0];
+      if (!inserted) throw new Error('Registry rollback snapshot insert returned no row');
+      for (const entry of manifests.rows) await tx.query('INSERT INTO model_manifests (snapshot_version, model_id, provider, model_name, manifest) VALUES ($1, $2, $3, $4, $5)', [inserted.version, entry.model_id, entry.manifest.provider, entry.manifest.model, JSON.stringify(entry.manifest)]);
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'models.rollback', `registry:${inserted.version}`, { targetVersion: input.targetVersion, previousVersion: Number(current.version), reason: input.reason, modelCount: manifests.rows.length });
+      return snapshot(inserted, manifests.rows.map((entry) => entry.manifest));
+    });
+  }
+
+  async disableModel(input: { modelId: string; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:registry-publish'))");
+      const current = (await tx.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots ORDER BY version DESC LIMIT 1')).rows[0];
+      if (!current || Number(current.version) !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying model disable', 'registry_version_conflict', 409, false);
+      const manifests = await tx.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = $1 ORDER BY model_id', [current.version]);
+      const target = manifests.rows.find((entry) => entry.model_id === input.modelId);
+      if (!target) throw new RouterError('Model was not found in the current registry', 'model_not_found', 404, false);
+      if (!target.manifest.enabled) return snapshot(current, manifests.rows.map((entry) => entry.manifest));
+      if (manifests.rows.filter((entry) => entry.manifest.enabled).length <= 1) throw new RouterError('Cannot disable the last enabled model', 'last_enabled_model', 409, false);
+      const models = manifests.rows.map((entry) => entry.model_id === input.modelId ? { ...entry.manifest, enabled: false } : entry.manifest);
+      const inserted = (await tx.query<SnapshotRow>('INSERT INTO model_registry_snapshots (source) VALUES ($1) RETURNING version, source, created_at', [`disable:${input.modelId}`])).rows[0];
+      if (!inserted) throw new Error('Emergency-disable snapshot insert returned no row');
+      for (const model of models) await tx.query('INSERT INTO model_manifests (snapshot_version, model_id, provider, model_name, manifest) VALUES ($1, $2, $3, $4, $5)', [inserted.version, model.id, model.provider, model.model, JSON.stringify(model)]);
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'models.disable', `registry:${inserted.version}`, { modelId: target.manifest.id, modelVersion: target.manifest.version, provider: target.manifest.provider, previousVersion: Number(current.version), reason: input.reason });
+      return snapshot(inserted, models);
+    });
+  }
+
+  async listTenantPolicies(): Promise<readonly TenantPolicyBundle[]> {
+    const result = await this.db.query<TenantPolicyRow>(`SELECT ${tenantPolicyColumns} FROM tenant_policies ORDER BY tenant_id`);
+    return result.rows.map(tenantPolicy);
+  }
+
+  async tenantPolicy(tenantId: string): Promise<TenantPolicyBundle | undefined> {
+    const row = (await this.db.query<TenantPolicyRow>(`SELECT ${tenantPolicyColumns} FROM tenant_policies WHERE tenant_id = $1`, [tenantId])).rows[0];
+    return row ? tenantPolicy(row) : undefined;
+  }
+
+  async setTenantPolicy(input: TenantPolicyConstraints & { tenantId: string; expectedVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<TenantPolicyBundle> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:tenant-policy:' || $1))", [input.tenantId]);
+      const existing = (await tx.query<{ version: string | number }>('SELECT version FROM tenant_policies WHERE tenant_id = $1 FOR UPDATE', [input.tenantId])).rows[0];
+      const currentVersion = Number(existing?.version ?? 0);
+      if (currentVersion !== input.expectedVersion) throw new RouterError('Tenant policy version changed; reload before retrying', 'policy_version_conflict', 409, false);
+      const row = (await tx.query<TenantPolicyRow>(`INSERT INTO tenant_policies (tenant_id, version, allowed_providers, denied_providers, allowed_models, denied_models, allowed_regions, allowed_data_classes, max_cost_usd, max_latency_ms, min_quality, allow_fallback) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (tenant_id) DO UPDATE SET version = EXCLUDED.version, allowed_providers = EXCLUDED.allowed_providers, denied_providers = EXCLUDED.denied_providers, allowed_models = EXCLUDED.allowed_models, denied_models = EXCLUDED.denied_models, allowed_regions = EXCLUDED.allowed_regions, allowed_data_classes = EXCLUDED.allowed_data_classes, max_cost_usd = EXCLUDED.max_cost_usd, max_latency_ms = EXCLUDED.max_latency_ms, min_quality = EXCLUDED.min_quality, allow_fallback = EXCLUDED.allow_fallback, updated_at = now() RETURNING ${tenantPolicyColumns}`, [input.tenantId, currentVersion + 1, input.allowedProviders ?? null, input.deniedProviders ?? null, input.allowedModels ?? null, input.deniedModels ?? null, input.allowedRegions ?? null, input.allowedDataClasses ?? null, input.maxCostUsd ?? null, input.maxLatencyMs ?? null, input.minQuality ?? null, input.allowFallback ?? null])).rows[0];
+      if (!row) throw new Error('Tenant policy update returned no row');
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'policy.set', `tenant:${input.tenantId}`, { version: currentVersion + 1, reason: input.reason });
+      return tenantPolicy(row);
+    });
+  }
+
   async budgetFor(tenantId: string): Promise<BudgetSnapshot> {
     const result = await this.db.query<BudgetRow>('SELECT tenant_id, limit_usd, reserved_usd, spent_usd FROM tenant_budgets WHERE tenant_id = $1', [tenantId]);
     const row = result.rows[0];
@@ -230,9 +341,35 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  async listAudit(limit: number): Promise<readonly AuditEvent[]> {
-    const result = await this.db.query<AuditRow>('SELECT id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at FROM admin_audit_events ORDER BY occurred_at DESC, id DESC LIMIT $1', [limit]);
+  async listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]> {
+    const result = before
+      ? await this.db.query<AuditRow>('SELECT id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at FROM admin_audit_events WHERE (occurred_at, id) < ($2::timestamptz, $3::uuid) ORDER BY occurred_at DESC, id DESC LIMIT $1', [limit, before.occurredAt, before.id])
+      : await this.db.query<AuditRow>('SELECT id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at FROM admin_audit_events ORDER BY occurred_at DESC, id DESC LIMIT $1', [limit]);
     return result.rows.map(auditEvent);
+  }
+
+  async verifyAudit() {
+    const result = await this.db.query<{ valid: boolean; checked_events: string | number; head_sequence: string | number | null; head_hash: string | null }>(`
+      WITH calculated AS (
+        SELECT chain_sequence, event_hash,
+          row_number() OVER (ORDER BY chain_sequence) AS ordinal,
+          COALESCE(lag(event_hash) OVER (ORDER BY chain_sequence), repeat('0', 64)) AS expected_previous_hash,
+          previous_hash,
+          encode(digest(convert_to(jsonb_build_object(
+            'v', 1, 'sequence', chain_sequence, 'previousHash', previous_hash,
+            'id', id::text, 'actorCredentialId', actor_credential_id,
+            'actorTenantId', actor_tenant_id, 'action', action,
+            'target', target, 'details', details,
+            'occurredAt', to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+          )::text, 'UTF8'), 'sha256'), 'hex') AS calculated_hash
+        FROM admin_audit_events
+      )
+      SELECT COALESCE(bool_and(chain_sequence = ordinal AND previous_hash = expected_previous_hash AND event_hash = calculated_hash), true) AS valid,
+        count(*) AS checked_events, max(chain_sequence) AS head_sequence,
+        (array_agg(event_hash ORDER BY chain_sequence DESC))[1] AS head_hash
+      FROM calculated`);
+    const row = result.rows[0]!;
+    return { valid: row.valid, checkedEvents: Number(row.checked_events), headSequence: row.head_sequence === null ? null : Number(row.head_sequence), headHash: row.head_hash };
   }
 
   async submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence> {
@@ -384,7 +521,7 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
   }
 
   private async appendAudit(db: SqlClient, actorCredentialId: string, actorTenantId: string, action: AuditEvent['action'], target: string, details: Record<string, unknown>): Promise<void> {
-    await db.query('INSERT INTO admin_audit_events (id, actor_credential_id, actor_tenant_id, action, target, details) VALUES ($1, $2, $3, $4, $5, $6)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
+    await db.query('SELECT append_admin_audit_event($1, $2, $3, $4, $5, $6::jsonb)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
   }
 
   private async evidenceForWith(db: SqlClient, modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined> {

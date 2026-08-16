@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ProviderError, RequestCancelledError } from '../src/domain/errors.js';
-import { ResilientProvider } from '../src/execution/resilience.js';
+import { BulkheadProvider, ResilientProvider } from '../src/execution/resilience.js';
+import { InMemoryMetrics } from '../src/observability/metrics.js';
 import type { ProviderAdapter } from '../src/ports/provider.js';
 import { defaultModels } from '../src/registry/default-models.js';
 
@@ -46,5 +47,56 @@ describe('provider resilience', () => {
     }
     const result = await resilient.complete(request);
     expect(result.output).toBe('ok');
+  });
+
+  it('admits only one half-open probe after circuit cooldown', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      let releaseProbe!: () => void;
+      const provider: ProviderAdapter = { name: 'simulator', listModels: () => [model], complete: async () => {
+        calls += 1;
+        if (calls === 1) throw new ProviderError('outage', true);
+        await new Promise<void>((resolve) => { releaseProbe = resolve; });
+        return { output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' };
+      }, stream: async function* () {} };
+      const resilient = new ResilientProvider(provider, { maxRetries: 0, timeoutMs: 1_000, failureThreshold: 1, cooldownMs: 100 });
+      await expect(resilient.complete(request)).rejects.toThrow('outage');
+      vi.advanceTimersByTime(101);
+      const probe = resilient.complete(request);
+      await expect(resilient.complete(request)).rejects.toThrow('half-open');
+      expect(calls).toBe(2);
+      releaseProbe();
+      await expect(probe).resolves.toMatchObject({ output: 'ok' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('sheds excess completion work immediately and releases the permit', async () => {
+    let release!: () => void;
+    const provider: ProviderAdapter = { name: 'simulator', listModels: () => [model], complete: async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' };
+    }, stream: async function* () {} };
+    const metrics = new InMemoryMetrics();
+    const bulkhead = new BulkheadProvider(provider, 1, metrics);
+    const first = bulkhead.complete(request);
+    await expect(bulkhead.complete(request)).rejects.toMatchObject({ code: 'provider_saturated', statusCode: 503, retryable: true });
+    expect(metrics.snapshot().operational.provider_saturated).toBe(1);
+    release();
+    await expect(first).resolves.toMatchObject({ output: 'ok' });
+    const next = bulkhead.complete(request); release();
+    await expect(next).resolves.toMatchObject({ output: 'ok' });
+  });
+
+  it('releases a streaming permit when the consumer stops early', async () => {
+    const provider: ProviderAdapter = { name: 'simulator', listModels: () => [model], complete: async () => ({ output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }), stream: async function* () {
+      yield { requestId: 'stream', index: 0, delta: 'first', done: false };
+      await new Promise(() => undefined);
+    } };
+    const bulkhead = new BulkheadProvider(provider, 1);
+    const iterator = bulkhead.stream(request)[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { delta: 'first' } });
+    await iterator.return?.();
+    await expect(bulkhead.complete(request)).resolves.toMatchObject({ output: 'ok' });
   });
 });

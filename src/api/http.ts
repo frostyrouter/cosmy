@@ -3,7 +3,9 @@ import { responseRequestJsonSchema, responseResultJsonSchema } from './json-sche
 import { NoRouteError, ProviderError, RouterError } from '../domain/errors.js';
 import type { ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
-import type { RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
+import type { ApiScope, RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
+import { requestId } from '../util/ids.js';
+import type { ReloadableTenantPolicyResolver } from '../policy/tenant-policy.js';
 
 function errorBody(error: unknown, requestId?: string): { error: { code: string; message: string; requestId?: string; retryable?: boolean; details?: unknown } } {
   if (error instanceof NoRouteError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable, details: { rejected: error.rejected } } };
@@ -16,20 +18,25 @@ function writeSse(reply: FastifyReply, event: string, data: unknown): void {
   reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined): RequestPrincipal | undefined {
+async function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope = 'responses:create'): Promise<RequestPrincipal | undefined> {
   if (!authenticator) return undefined;
-  const principal = authenticator.authenticate(authorization);
+  const principal = await authenticator.authenticate(authorization);
   if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401);
-  if (!principal.scopes.includes('responses:create')) throw new RouterError('Credential cannot create responses', 'authorization_error', 403);
+  if (!principal.scopes.includes(scope)) throw new RouterError(`Credential lacks required scope '${scope}'`, 'authorization_error', 403);
   return principal;
 }
 
-function tenantRequest(input: ResponseRequest, principal: RequestPrincipal | undefined): ResponseRequest {
+function responseEvent(responseId: string, sequence: number, type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
+  return { responseId, sequence, type, ...payload };
+}
+
+function tenantRequest(input: ResponseRequest, principal: RequestPrincipal | undefined, policies?: ReloadableTenantPolicyResolver): ResponseRequest {
   const tenantId = principal?.tenantId ?? 'anonymous';
   if (input.policy?.tenantId && input.policy.tenantId !== tenantId) {
     throw new RouterError('Request tenant does not match the authenticated credential', 'authorization_error', 403);
   }
-  return { ...input, policy: { ...input.policy, tenantId } };
+  const tenantBound = { ...input, policy: { ...input.policy, tenantId } };
+  return policies?.resolve(tenantBound, tenantId) ?? tenantBound;
 }
 
 function idempotencyKey(value: string | string[] | undefined): string | undefined {
@@ -40,7 +47,7 @@ function idempotencyKey(value: string | string[] | undefined): string | undefine
   return value;
 }
 
-export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator): void {
+export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator, policies?: ReloadableTenantPolicyResolver): void {
   app.setErrorHandler((error: FastifyError, _request, reply) => {
     if (error.validation) {
       return reply.code(400).send({ error: { code: 'invalid_request', message: error.message } });
@@ -57,12 +64,52 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     return { status: 'ready' };
   });
 
+  app.get('/v1/models', async (request, reply) => {
+    try {
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
+      const tenantId = principal?.tenantId ?? 'anonymous';
+      return { object: 'list', data: service.listModels(tenantId).filter((model) => policies?.allowsModel(tenantId, model) ?? true) };
+    } catch (error) {
+      const normalized = errorBody(error);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.post('/v1/routing/simulate', { schema: { body: responseRequestJsonSchema } }, async (request, reply) => {
+    const submitted = request.body as unknown as ResponseRequest;
+    const controller = new AbortController();
+    reply.raw.on('close', () => controller.abort());
+    try {
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
+      const input = tenantRequest(submitted, principal, policies);
+      return { nonBinding: true, decision: await service.simulate(input, controller.signal) };
+    } catch (error) {
+      const normalized = errorBody(error, submitted.requestId);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.get('/v1/routing/decisions/:decisionId', async (request, reply) => {
+    try {
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
+      const decisionId = (request.params as { decisionId?: string }).decisionId;
+      if (!decisionId || !/^[A-Za-z0-9._:-]{1,128}$/u.test(decisionId)) throw new RouterError('Decision ID is invalid', 'invalid_request', 400);
+      const decision = await service.decision(principal?.tenantId ?? 'anonymous', decisionId);
+      if (!decision) throw new RouterError('Routing decision was not found', 'decision_not_found', 404, false);
+      return decision;
+    } catch (error) {
+      const normalized = errorBody(error);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
   app.post('/v1/responses', { schema: { body: responseRequestJsonSchema, response: { 200: responseResultJsonSchema } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     const submitted = request.body as unknown as ResponseRequest;
     let input: ResponseRequest;
     let requestKey: string | undefined;
     try {
-      input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator));
+      input = tenantRequest(submitted, await authorize(request.headers.authorization, authenticator), policies);
+      input = input.requestId ? input : { ...input, requestId: requestId() };
       requestKey = idempotencyKey(request.headers['idempotency-key']);
       if (input.stream && requestKey) throw new RouterError('Idempotency-Key is not supported for streaming requests', 'invalid_request', 400);
     } catch (error) {
@@ -87,15 +134,21 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
         reply.raw.setHeader('content-type', 'text/event-stream');
         reply.raw.setHeader('cache-control', 'no-cache');
         reply.raw.setHeader('connection', 'keep-alive');
+        let sequence = 0;
+        const emit = (type: string, payload: Record<string, unknown> = {}) => writeSse(reply, type, responseEvent(first.value?.requestId ?? input.requestId ?? 'unknown', sequence++, type, payload));
         try {
-          if (!first.done) writeSse(reply, first.value.done ? 'done' : 'delta', first.value);
+          if (!first.done) {
+            emit('response.created', { status: 'in_progress' });
+            if (first.value.route) emit('response.route.selected', { decisionId: first.value.route.requestId, model: first.value.route.selected.model.model, provider: first.value.route.selected.model.provider });
+            emitChunk(first.value, emit);
+          }
           while (!first.done) {
             first = await iterator.next();
-            if (!first.done) writeSse(reply, first.value.done ? 'done' : 'delta', first.value);
+            if (!first.done) emitChunk(first.value, emit);
           }
         } catch (error) {
           request.log.warn({ err: error }, 'stream failed');
-          writeSse(reply, 'error', errorBody(error, input.requestId));
+          emit('response.failed', errorBody(error, input.requestId));
         } finally {
           reply.raw.end();
         }
@@ -108,4 +161,21 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
       return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
     }
   });
+}
+
+function emitChunk(chunk: import('../domain/types.js').ResponseChunk, emit: (type: string, payload?: Record<string, unknown>) => void): void {
+  const outputIndex = chunk.outputIndex ?? chunk.index;
+  if (chunk.type === 'tool-call-added') {
+    emit('response.output_item.added', { outputIndex, item: { type: 'function_call', id: chunk.toolCallId, name: chunk.toolName, arguments: {} } });
+  } else if (chunk.type === 'tool-call-arguments-delta') {
+    emit('response.tool_call.arguments.delta', { outputIndex, callId: chunk.toolCallId, name: chunk.toolName, delta: chunk.delta });
+  } else if (chunk.type === 'tool-call-done') {
+    emit('response.output_item.done', { outputIndex, item: { type: 'function_call', id: chunk.toolCallId, name: chunk.toolName, arguments: chunk.toolArguments ?? {} } });
+  } else if (!chunk.done) {
+    emit('response.output_text.delta', { outputIndex, delta: chunk.delta });
+  }
+  if (chunk.done) {
+    if (chunk.usage) emit('response.usage.updated', { usage: chunk.usage });
+    emit('response.completed', { status: 'completed' });
+  }
 }

@@ -132,6 +132,8 @@ Emergency disable remains single-action but requires post-incident review.
 
 Audit events include actor, action, target, old/new version, time, source, approval, reason, and correlation ID. High-value logs use tamper-evident storage and restricted deletion.
 
+PostgreSQL administrative mutations use the implemented SHA-256 predecessor chain and authenticated verification endpoint described in [tamper-evident administrative audit](41-tamper-evident-audit.md). External anchoring is required to defend against an attacker who can rewrite the database and every stored hash.
+
 ## Privacy rights
 
 The data model supports:

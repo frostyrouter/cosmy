@@ -5,6 +5,7 @@ import { sha256ApiKey } from '../src/security/auth.js';
 import { SimulatorProvider } from '../src/providers/simulator.js';
 import { defaultModels } from '../src/registry/default-models.js';
 import { InMemoryMetrics } from '../src/observability/metrics.js';
+import type { ProviderAdapter } from '../src/ports/provider.js';
 
 describe('HTTP API', () => {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
@@ -21,6 +22,18 @@ describe('HTTP API', () => {
     expect(body.route.selected.model.id).toBeTruthy();
     expect(body.usage.totalTokens).toBeGreaterThan(0);
     expect(body.usage.totalTokens).toBe(body.usage.inputTokens + body.usage.outputTokens);
+  });
+
+  it('returns provider-neutral tool calls without dropping stable call IDs', async () => {
+    const provider: ProviderAdapter = {
+      name: 'simulator', listModels: () => defaultModels,
+      complete: async () => ({ output: '', toolCalls: [{ id: 'call_weather_1', name: 'weather', arguments: { city: 'Paris' } }], usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7, estimatedCostUsd: 0 }, finishReason: 'tool_calls' }),
+      stream: async function* () {},
+    };
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 }, { providers: [provider] });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'Check weather' }], tools: [{ name: 'weather', inputSchema: { type: 'object' } }] } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ finishReason: 'tool_calls', toolCalls: [{ id: 'call_weather_1', name: 'weather', arguments: { city: 'Paris' } }] });
   });
 
   it('resolves timeout and retry defaults for partial programmatic configuration', async () => {
@@ -149,6 +162,20 @@ describe('HTTP API', () => {
     expect(response.json().error.code).toBe('invalid_request');
   });
 
+  it('validates tool-result continuation IDs before provider execution', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: {
+      messages: [
+        { role: 'user', content: 'Use weather' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'weather', arguments: { city: 'Paris' } }] },
+        { role: 'tool', content: '20C', name: 'weather', toolCallId: 'wrong_call' },
+      ],
+      tools: [{ name: 'weather', inputSchema: { type: 'object' } }],
+    } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatchObject({ code: 'invalid_request' });
+  });
+
   it('returns 400 for malformed JSON bodies instead of 500', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 60_000, providerMaxRetries: 0 });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: '{not json', headers: { 'content-type': 'application/json' } });
@@ -162,7 +189,15 @@ describe('HTTP API', () => {
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'hello world' }] } });
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/event-stream');
-    expect(response.body).toContain('event: done');
+    expect(response.body).toContain('event: response.completed');
+    expect(response.body).toContain('event: response.output_text.delta');
+    expect(response.body).toContain('event: response.created');
+    expect(response.body).toContain('event: response.route.selected');
+    expect(response.body).toContain('event: response.usage.updated');
+    const events = response.body.split('\n').filter((line) => line.startsWith('data: ')).map((line) => JSON.parse(line.slice(6)) as { responseId: string; sequence: number; type: string });
+    expect(events.map((event) => event.sequence)).toEqual(events.map((_event, index) => index));
+    expect(new Set(events.map((event) => event.responseId)).size).toBe(1);
+    expect(events.every((event) => event.type.startsWith('response.'))).toBe(true);
     expect(metrics.snapshot()).toMatchObject({ activeStreams: 0, successes: 1 });
   });
 
@@ -253,8 +288,56 @@ describe('HTTP API', () => {
       complete: async (input) => { await delay(300); if (input.signal.aborted) throw new Error('aborted'); return { output: 'late', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' }; },
       stream: async function* () {},
     };
-    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 100, providerMaxRetries: 0 }, { providers: [slow], registry: new (await import('../src/registry/memory-registry.js')).InMemoryModelRegistry([model]) });
+    const records: import('../src/domain/types.js').DecisionRecord[] = [];
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 100, providerMaxRetries: 0 }, { providers: [slow], registry: new (await import('../src/registry/memory-registry.js')).InMemoryModelRegistry([model]), decisions: { save: async (record) => { records.push(structuredClone(record)); }, get: async () => undefined } });
     const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { model: 'slow', messages: [{ role: 'user', content: 'hello' }] } });
+    expect(response.statusCode).toBe(504);
+    expect(response.json().error.code).toBe('timeout');
+    expect(records.at(-1)).toMatchObject({ state: 'failed', errorCode: 'timeout' });
+  });
+
+  it('returns 503 immediately when provider concurrency is saturated', async () => {
+    let release!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const provider: ProviderAdapter = {
+      name: 'simulator', listModels: () => defaultModels,
+      complete: async () => {
+        markStarted();
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' };
+      },
+      stream: async function* () {},
+    };
+    const metrics = new InMemoryMetrics();
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 5_000, providerMaxRetries: 0, providerMaxConcurrency: 1 }, { providers: [provider], metrics });
+    const request = { method: 'POST' as const, url: '/v1/responses', payload: { model: defaultModels[0]!.id, messages: [{ role: 'user', content: 'hello' }] } };
+    const first = app.inject(request);
+    await started;
+    const saturated = await app.inject(request);
+    expect(saturated.statusCode).toBe(503);
+    expect(saturated.json().error).toMatchObject({ code: 'provider_saturated', retryable: true });
+    expect(metrics.snapshot().operational.provider_saturated).toBe(1);
+    release();
+    expect((await first).statusCode).toBe(200);
+  });
+
+  it('includes classifier time in the overall request deadline', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 30, classifierTimeoutMs: 5_000, classifierMode: 'fail', providerMaxRetries: 0 }, {
+      classifier: { name: 'slow', classify: async () => new Promise(() => {}) },
+    });
+    const started = Date.now();
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { messages: [{ role: 'user', content: 'classify this' }] } });
+    expect(response.statusCode).toBe(504);
+    expect(response.json().error).toMatchObject({ code: 'timeout', retryable: true });
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('applies the same deadline through routing to streaming time-to-first-event', async () => {
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 30, classifierTimeoutMs: 5_000, classifierMode: 'fail', providerMaxRetries: 0 }, {
+      classifier: { name: 'slow', classify: async () => new Promise(() => {}) },
+    });
+    const response = await app.inject({ method: 'POST', url: '/v1/responses', payload: { stream: true, messages: [{ role: 'user', content: 'classify stream' }] } });
     expect(response.statusCode).toBe(504);
     expect(response.json().error.code).toBe('timeout');
   });

@@ -1,6 +1,6 @@
 import { NoRouteError, RequestCancelledError, RouterError } from '../domain/errors.js';
-import type { ClassificationStatus, RequestFeatures, ResponseRequest, RouteCandidate, RouteDecision, RouteMetadata } from '../domain/types.js';
-import type { ModelRegistry } from '../ports/stores.js';
+import type { ClassificationStatus, ModelConfiguration, RequestFeatures, ResponseRequest, RouteCandidate, RouteDecision, RouteMetadata } from '../domain/types.js';
+import type { HealthSnapshotStore, ModelHealthSnapshot, ModelRegistry } from '../ports/stores.js';
 import type { RequestClassifier, RequestClassificationInput } from '../ports/classifier.js';
 import { defaultPolicy, filterEligible, rankCandidates, type Policy } from './policy.js';
 import { extractFeatures, mergeClassification } from './features.js';
@@ -16,6 +16,9 @@ export interface RouterOptions {
   classifierTimeoutMs?: number;
   failureMode?: ClassificationFailureMode;
   admission?: ModelAdmission;
+  health?: HealthSnapshotStore;
+  healthFailureThreshold?: number;
+  healthCooldownMs?: number;
 }
 
 const defaultClassifierTimeoutMs = 5_000;
@@ -65,6 +68,9 @@ export class DeterministicRouter {
   private readonly classifierTimeoutMs: number;
   private readonly failureMode: ClassificationFailureMode;
   private readonly admission: ModelAdmission | undefined;
+  private readonly health: HealthSnapshotStore | undefined;
+  private readonly healthFailureThreshold: number;
+  private readonly healthCooldownMs: number;
 
   constructor(
     private readonly registry: ModelRegistry,
@@ -78,9 +84,22 @@ export class DeterministicRouter {
     this.classifierTimeoutMs = Math.max(1, routingOptions.classifierTimeoutMs ?? defaultClassifierTimeoutMs);
     this.failureMode = routingOptions.failureMode ?? 'degrade';
     this.admission = routingOptions.admission ?? legacyAdmission;
+    this.health = routingOptions.health;
+    this.healthFailureThreshold = Math.max(1, routingOptions.healthFailureThreshold ?? 3);
+    this.healthCooldownMs = Math.max(1, routingOptions.healthCooldownMs ?? 30_000);
   }
 
   get policyVersion(): string { return this.policy.version; }
+
+  private policyVersionFor(request: ResponseRequest): string {
+    return request.policy?.tenantPolicyVersion === undefined ? this.policy.version : `${this.policy.version}:tenant-${request.policy.tenantPolicyVersion}`;
+  }
+
+  listModels(tenantId?: string): readonly ModelConfiguration[] {
+    const observed = new Map(this.health?.snapshot().map((snapshot) => [snapshot.modelId, snapshot]) ?? []);
+    return this.registry.snapshot().filter((model) => model.enabled && (!this.admission || this.admission.allows(model, tenantId)))
+      .map((model) => structuredClone(overlayHealth(model, observed.get(model.id))));
+  }
 
   decide(requestId: string, request: ResponseRequest): RouteDecision {
     return this.buildRoute(requestId, request, extractFeatures(request), 'deterministic');
@@ -107,22 +126,31 @@ export class DeterministicRouter {
 
   private buildRoute(requestId: string, request: ResponseRequest, features: RequestFeatures, classificationStatus: ClassificationStatus): RouteDecision {
     const tenantId = request.policy?.tenantId;
+    const observed = new Map(this.health?.snapshot().map((snapshot) => [snapshot.modelId, snapshot]) ?? []);
+    const withObservedHealth = (model: ModelConfiguration): ModelConfiguration => overlayHealth(model, observed.get(model.id));
+    const healthUnavailable = (model: ModelConfiguration): boolean => {
+      const snapshot = observed.get(model.id);
+      return snapshot !== undefined && snapshot.consecutiveFailures >= this.healthFailureThreshold
+        && Date.now() - Date.parse(snapshot.updatedAt) < this.healthCooldownMs;
+    };
     if (request.model) {
       const explicit = this.registry.get(request.model);
       if (!explicit) throw new NoRouteError(`Requested model '${request.model}' is not registered`);
       if (this.admission && !this.admission.allows(explicit, tenantId)) throw new NoRouteError('Requested model is not assigned to this tenant rollout', [{ modelId: explicit.id, reason: 'rollout_not_assigned' }]);
-      const eligibility = filterEligible([explicit], features, request.policy, { bypassInferredQualityFloor: true });
+      if (healthUnavailable(explicit)) throw new NoRouteError('Requested model is temporarily unavailable', [{ modelId: explicit.id, reason: 'observed_health_unavailable' }]);
+      const eligibility = filterEligible([withObservedHealth(explicit)], features, request.policy, { bypassInferredQualityFloor: true });
       if (eligibility.eligible.length === 0) throw new NoRouteError('Requested model cannot satisfy this request', eligibility.rejected);
       const selected = rankCandidates(eligibility.eligible, features, request.policy, this.policy)[0];
       if (!selected) throw new NoRouteError('Requested model cannot satisfy this request');
       if (features.deepReasoningRequired === true && !supportsReasoning(selected)) throw new NoRouteError('Requested model cannot satisfy deep reasoning requirement', [...eligibility.rejected, { modelId: selected.model.id, reason: 'deep_reasoning_required' }]);
-      return { requestId, selected, alternatives: [], rejected: eligibility.rejected, features, policyVersion: this.policy.version, createdAt: nowIso(), metadata: routeMetadata(classificationStatus, selected.model.id, selected.model.id, false) };
+      return { requestId, selected, alternatives: [], rejected: eligibility.rejected, features, policyVersion: this.policyVersionFor(request), createdAt: nowIso(), metadata: routeMetadata(classificationStatus, selected.model.id, selected.model.id, false) };
     }
     const allModels = this.registry.snapshot();
     const rolloutRejected = this.admission ? allModels.filter((model) => !this.admission!.allows(model, tenantId)).map((model) => ({ modelId: model.id, reason: 'rollout_not_assigned' })) : [];
-    const admitted = this.admission ? allModels.filter((model) => this.admission!.allows(model, tenantId)) : allModels;
+    const healthRejected = allModels.filter((model) => (!this.admission || this.admission.allows(model, tenantId)) && healthUnavailable(model)).map((model) => ({ modelId: model.id, reason: 'observed_health_unavailable' }));
+    const admitted = allModels.filter((model) => (!this.admission || this.admission.allows(model, tenantId)) && !healthUnavailable(model)).map(withObservedHealth);
     const eligibility = filterEligible(admitted, features, request.policy);
-    eligibility.rejected.unshift(...rolloutRejected);
+    eligibility.rejected.unshift(...rolloutRejected, ...healthRejected);
     const ranked = rankCandidates(eligibility.eligible, features, request.policy, this.policy);
     const initial = ranked[0];
     if (!initial) throw new NoRouteError('No registered model satisfies this request', eligibility.rejected);
@@ -139,6 +167,22 @@ export class DeterministicRouter {
       }
       alternatives = reasoningCandidates.filter((candidate) => candidate.model.id !== selected.model.id).slice(0, 2);
     }
-    return { requestId, selected, alternatives, rejected: eligibility.rejected, features, policyVersion: this.policy.version, createdAt: nowIso(), metadata: routeMetadata(classificationStatus, initial.model.id, selected.model.id, promoted) };
+    return { requestId, selected, alternatives, rejected: eligibility.rejected, features, policyVersion: this.policyVersionFor(request), createdAt: nowIso(), metadata: routeMetadata(classificationStatus, initial.model.id, selected.model.id, promoted) };
   }
+}
+
+function overlayHealth(model: ModelConfiguration, snapshot?: ModelHealthSnapshot): ModelConfiguration {
+  if (!snapshot) return model;
+  const observations = snapshot.successes + snapshot.failures;
+  const observedErrorRate = observations === 0 ? model.health.errorRate : snapshot.failures / observations;
+  return {
+    ...model,
+    health: {
+      availability: Math.min(model.health.availability, 1 - observedErrorRate),
+      errorRate: Math.max(model.health.errorRate, observedErrorRate),
+      // A single observed latency is not a p95 and must not permanently violate latency policy.
+      latencyP95Ms: model.health.latencyP95Ms,
+      checkedAt: snapshot.updatedAt,
+    },
+  };
 }

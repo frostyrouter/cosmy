@@ -9,7 +9,7 @@ This slice turns the architecture contracts into a runnable, provider-neutral se
 The service composes five replaceable parts:
 
 1. `DeterministicRouter` extracts request features, filters models by hard constraints, and ranks eligible candidates.
-2. `RequestExecutor` reserves budget, invokes the selected provider, records usage, and updates health.
+2. `RequestExecutor` reserves budget, invokes the selected provider, validates non-streaming structured output, records usage, and updates health.
 3. `ProviderAdapter` hides provider-specific transport and normalization.
 4. `ModelRegistry` and stores provide the control-plane data boundary; memory implementations make local tests deterministic.
 5. `RequestClassifier` produces a validated semantic demand vector before automatic production routing.
@@ -23,6 +23,8 @@ The simulator is intentionally the default provider. It exercises complete and S
 Each model can carry a versioned multidimensional capability vector. Automatic async routing merges deterministic request facts with a validated DeepSeek V4 Flash demand vector, applies hard policy and quality constraints, Pareto-prunes only safe same-provider supersets, and selects the cheapest qualifying candidate. Deep-reasoning support is deliberately checked after initial selection; an incompatible candidate is promoted to the next cheapest reasoning-capable option.
 
 The synchronous `decide()` path remains available for deterministic replay and offline evaluation. Classifier timeout or invalid output can either degrade to that path or fail closed according to `CLASSIFIER_MODE`.
+
+Runtime execution observations feed back into subsequent route admission. See [`29-live-health-and-output-validation.md`](29-live-health-and-output-validation.md) for circuit cooldown, schema coverage, cost bounds, and streaming limitations.
 
 ## Development commands
 

@@ -1,8 +1,21 @@
-import type { ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
+import type { DecisionRecord, ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
 import type { BudgetSnapshot, ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 import type { ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
+import type { ApiCredential, ApiScope } from '../security/auth.js';
+import type { TenantPolicyBundle, TenantPolicyConstraints } from '../policy/tenant-policy.js';
+
+export interface ManagedApiCredential extends ApiCredential {
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CredentialStore {
+  listCredentials(): Promise<readonly ManagedApiCredential[]>;
+  createCredential(input: { id: string; tenantId: string; keySha256: string; scopes: readonly ApiScope[]; actorCredentialId: string; actorTenantId: string }): Promise<ManagedApiCredential>;
+  disableCredential(input: { id: string; actorCredentialId: string; actorTenantId: string }): Promise<ManagedApiCredential>;
+}
 
 export interface RegistryRepository {
   getCurrent(): Promise<RegistrySnapshot | undefined>;
@@ -41,21 +54,36 @@ export interface IdempotencyStore {
   release(tenantId: string, key: string, requestHash: string): Promise<void>;
 }
 
+export interface DecisionStore {
+  save(record: DecisionRecord): Promise<void>;
+  get(tenantId: string, decisionId: string): Promise<DecisionRecord | undefined>;
+}
+
 export interface AuditEvent {
   id: string;
   actorCredentialId: string;
   actorTenantId: string;
-  action: 'models.publish' | 'budget.set' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
+  action: 'models.publish' | 'models.rollback' | 'models.disable' | 'budget.set' | 'policy.set' | 'credential.create' | 'credential.disable' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
   target: string;
   details: Record<string, unknown>;
   occurredAt: string;
 }
 
+export type AuditPosition = Pick<AuditEvent, 'id' | 'occurredAt'>;
+export interface AuditVerification { valid: boolean; checkedEvents: number; headSequence: number | null; headHash: string | null; }
+
 export interface ControlPlaneStore {
   publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
+  registrySnapshot(version: number): Promise<RegistrySnapshot | undefined>;
+  rollbackModels(input: { targetVersion: number; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
+  disableModel(input: { modelId: string; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
+  listTenantPolicies(): Promise<readonly TenantPolicyBundle[]>;
+  tenantPolicy(tenantId: string): Promise<TenantPolicyBundle | undefined>;
+  setTenantPolicy(input: TenantPolicyConstraints & { tenantId: string; expectedVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<TenantPolicyBundle>;
   budgetFor(tenantId: string): Promise<BudgetSnapshot>;
   setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot>;
-  listAudit(limit: number): Promise<readonly AuditEvent[]>;
+  listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]>;
+  verifyAudit(): Promise<AuditVerification>;
   submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence>;
   evidenceFor(modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined>;
   createRollout(input: Omit<ModelRollout, 'id' | 'state' | 'sampleCount' | 'errorCount' | 'totalLatencyMs' | 'reason' | 'createdAt' | 'updatedAt'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelRollout>;

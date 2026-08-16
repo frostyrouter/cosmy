@@ -6,6 +6,8 @@ Status: Proposed.
 
 The router depends on external providers it does not control. Reliability is achieved through isolation, deadlines, bounded retries, eligible fallbacks, cached configuration, and rapid model/provider revocation.
 
+Per-provider in-process bulkheads and single-probe half-open circuit recovery are implemented; see [provider bulkheads and load shedding](40-provider-bulkheads.md).
+
 ## Scaling unit
 
 The primary data-plane scaling unit is a stateless router worker inside a regional cell. Workers scale by:
