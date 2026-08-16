@@ -63,6 +63,28 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await expect(control.listAudit(10)).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ action: 'models.rollback', target: `registry:${restored.version}`, details: expect.objectContaining({ targetVersion: target.version, previousVersion: current.version, reason: 'incident' }) })]));
   });
 
+  it('serializes emergency model disable and preserves one enabled model', async () => {
+    const actor = { actorCredentialId: 'control-admin', actorTenantId: 'platform' };
+    for (const model of defaultModels) await control.submitEvidence({ modelId: model.id, modelVersion: model.version, suiteVersion: 'suite-1', datasetVersion: 'dataset-1', conformancePassed: true, pricingVerified: true, usageVerified: true, routingPassRate: 1, qualityScore: 1, sampleCount: 200, evaluatedAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(), ...actor });
+    const initial = await control.publishModels({ models: defaultModels, source: 'disable-initial', ...actor });
+    const attempts = await Promise.allSettled([
+      control.disableModel({ modelId: defaultModels[0]!.id, expectedCurrentVersion: initial.version, reason: 'incident-a', ...actor }),
+      control.disableModel({ modelId: defaultModels[1]!.id, expectedCurrentVersion: initial.version, reason: 'incident-b', ...actor }),
+    ]);
+    expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const afterRace = attempts.find((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof control.disableModel>>> => result.status === 'fulfilled')!.value;
+    expect(afterRace.models.filter((model) => model.enabled)).toHaveLength(2);
+    const nextTarget = afterRace.models.find((model) => model.enabled)!;
+    const oneLeft = await control.disableModel({ modelId: nextTarget.id, expectedCurrentVersion: afterRace.version, reason: 'second isolation', ...actor });
+    expect(oneLeft.models.filter((model) => model.enabled)).toHaveLength(1);
+    const last = oneLeft.models.find((model) => model.enabled)!;
+    await expect(control.disableModel({ modelId: last.id, expectedCurrentVersion: oneLeft.version, reason: 'must fail closed', ...actor })).rejects.toMatchObject({ code: 'last_enabled_model', statusCode: 409 });
+    const latest = await control.registrySnapshot(oneLeft.version);
+    expect(latest?.models.filter((model) => model.enabled)).toHaveLength(1);
+    expect((await control.listAudit(20)).filter((event) => event.action === 'models.disable')).toHaveLength(2);
+  });
+
   it('rejects a new enabled version without passing evidence', async () => {
     const candidate = { ...structuredClone(defaultModels[0]!), id: 'postgres-candidate', version: '2' };
     await expect(control.publishModels({ models: [candidate], source: 'missing-evidence', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'promotion_gate_failed', statusCode: 409 });

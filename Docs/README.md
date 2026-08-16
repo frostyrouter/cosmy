@@ -42,6 +42,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Complete decision evidence](34-complete-decision-evidence.md)
 - [Durable credential lifecycle](35-durable-credential-lifecycle.md)
 - [Atomic registry rollback](36-atomic-registry-rollback.md)
+- [Emergency model disable](37-emergency-model-disable.md)
 
 ## Decision status vocabulary
 

@@ -9,6 +9,7 @@ Status: Implemented for model snapshots, tenant budgets, durable credentials, an
 | `GET /v1/admin/models` | `admin:read` | Read the active immutable registry snapshot |
 | `PUT /v1/admin/models` | `admin:write` | Validate and atomically publish a complete snapshot |
 | `POST /v1/admin/models/rollback` | `admin:write` | Copy an older snapshot into a new audited version; requires `If-Match` |
+| `POST /v1/admin/models/disable` | `admin:write` | Emergency-disable one model in a new audited snapshot; requires `If-Match` |
 | `GET /v1/admin/tenants/:id/budget` | `admin:read` | Read limit, reserved spend, and settled spend |
 | `PUT /v1/admin/tenants/:id/budget` | `admin:write` | Set a hard USD limit without dropping below current usage |
 | `GET /v1/admin/audit?limit=100&cursor=...` | `admin:read` | Page through administrative mutations, maximum 500 per page |
@@ -31,6 +32,8 @@ Cosmy rejects empty snapshots, duplicate IDs, invalid numeric bounds, output lim
 Other instances poll the latest snapshot every `REGISTRY_REFRESH_SECONDS` (default 15). Set it to zero only when an external restart/reload mechanism exists. Provider credentials and adapter configuration must be uniform across instances before enabling a new provider.
 
 Rollback requires the current registry version in `If-Match`, a prior `targetVersion`, and an operator `reason`. It creates a new version rather than mutating history. Missing preconditions return `428`; stale versions return `409`. See [atomic registry rollback](36-atomic-registry-rollback.md).
+
+Emergency disable also requires `If-Match` and an operator reason. It copies the current snapshot, changes only the selected model's lifecycle flag, and refuses to disable the last enabled model. See [emergency model disable](37-emergency-model-disable.md).
 
 ## Safe budget changes
 
@@ -65,4 +68,4 @@ PostgreSQL stores the mutation and its audit event in the same transaction. Even
 
 ## Current boundary
 
-This API manages model metadata, atomic registry rollback, tenant spending, durable hashed credentials, and stable audit-history pagination. Policy bundles and workload identity remain later control-plane work.
+This API manages model metadata, atomic registry rollback, emergency model disable, tenant spending, durable hashed credentials, and stable audit-history pagination. Policy bundles and workload identity remain later control-plane work.

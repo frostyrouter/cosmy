@@ -244,6 +244,8 @@ Administrative audit reads use stable keyset pagination. `GET /v1/admin/audit` r
 
 `POST /v1/admin/models/rollback` restores a prior durable registry snapshot as a new monotonic version. It requires `admin:write`, an operator reason, and `If-Match` containing the current version so concurrent or repeated commands cannot silently overwrite a newer publication.
 
+`POST /v1/admin/models/disable` creates a new snapshot with one model removed from route admission. It requires the same precondition and reason, is idempotent against an already-disabled current model, and refuses to disable the final enabled model.
+
 ### Durable API credentials
 
 The implemented credential-management endpoints require `admin:write`:

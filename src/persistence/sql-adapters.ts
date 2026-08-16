@@ -256,6 +256,26 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  async disableModel(input: { modelId: string; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:registry-publish'))");
+      const current = (await tx.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots ORDER BY version DESC LIMIT 1')).rows[0];
+      if (!current || Number(current.version) !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying model disable', 'registry_version_conflict', 409, false);
+      const manifests = await tx.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = $1 ORDER BY model_id', [current.version]);
+      const target = manifests.rows.find((entry) => entry.model_id === input.modelId);
+      if (!target) throw new RouterError('Model was not found in the current registry', 'model_not_found', 404, false);
+      if (!target.manifest.enabled) return snapshot(current, manifests.rows.map((entry) => entry.manifest));
+      if (manifests.rows.filter((entry) => entry.manifest.enabled).length <= 1) throw new RouterError('Cannot disable the last enabled model', 'last_enabled_model', 409, false);
+      const models = manifests.rows.map((entry) => entry.model_id === input.modelId ? { ...entry.manifest, enabled: false } : entry.manifest);
+      const inserted = (await tx.query<SnapshotRow>('INSERT INTO model_registry_snapshots (source) VALUES ($1) RETURNING version, source, created_at', [`disable:${input.modelId}`])).rows[0];
+      if (!inserted) throw new Error('Emergency-disable snapshot insert returned no row');
+      for (const model of models) await tx.query('INSERT INTO model_manifests (snapshot_version, model_id, provider, model_name, manifest) VALUES ($1, $2, $3, $4, $5)', [inserted.version, model.id, model.provider, model.model, JSON.stringify(model)]);
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'models.disable', `registry:${inserted.version}`, { modelId: target.manifest.id, modelVersion: target.manifest.version, provider: target.manifest.provider, previousVersion: Number(current.version), reason: input.reason });
+      return snapshot(inserted, models);
+    });
+  }
+
   async budgetFor(tenantId: string): Promise<BudgetSnapshot> {
     const result = await this.db.query<BudgetRow>('SELECT tenant_id, limit_usd, reserved_usd, spent_usd FROM tenant_budgets WHERE tenant_id = $1', [tenantId]);
     const row = result.rows[0];

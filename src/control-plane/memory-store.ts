@@ -48,6 +48,20 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return result;
   }
 
+  async disableModel(input: { modelId: string; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    const current = this.registry.currentSnapshot();
+    if (current.version !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying model disable', 'registry_version_conflict', 409, false);
+    const target = current.models.find((model) => model.id === input.modelId);
+    if (!target) throw new RouterError('Model was not found in the current registry', 'model_not_found', 404, false);
+    if (!target.enabled) return current;
+    if (current.models.filter((model) => model.enabled).length <= 1) throw new RouterError('Cannot disable the last enabled model', 'last_enabled_model', 409, false);
+    const models = current.models.map((model) => model.id === input.modelId ? { ...model, enabled: false } : model);
+    const result = this.registry.publish(models, `disable:${input.modelId}`);
+    this.registryHistory.set(result.version, structuredClone(result));
+    this.record(input.actorCredentialId, input.actorTenantId, 'models.disable', `registry:${result.version}`, { modelId: target.id, modelVersion: target.version, provider: target.provider, previousVersion: current.version, reason: input.reason });
+    return result;
+  }
+
   budgetFor(tenantId: string): Promise<BudgetSnapshot> { return this.budgets.budgetFor(tenantId); }
 
   async setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot> {

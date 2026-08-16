@@ -69,6 +69,11 @@ export class ControlPlaneService {
     return this.registry.load(snapshot);
   }
 
+  async disableModel(modelId: string, expectedCurrentVersion: number, reason: string, actor: RequestPrincipal) {
+    const snapshot = await this.store.disableModel({ modelId, expectedCurrentVersion, reason, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    return this.registry.load(snapshot);
+  }
+
   budgetFor(tenantId: string) { return this.store.budgetFor(tenantId); }
 
   setBudget(tenantId: string, limitUsd: number, actor: RequestPrincipal) {

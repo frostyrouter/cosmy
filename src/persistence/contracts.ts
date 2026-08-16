@@ -62,7 +62,7 @@ export interface AuditEvent {
   id: string;
   actorCredentialId: string;
   actorTenantId: string;
-  action: 'models.publish' | 'models.rollback' | 'budget.set' | 'credential.create' | 'credential.disable' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
+  action: 'models.publish' | 'models.rollback' | 'models.disable' | 'budget.set' | 'credential.create' | 'credential.disable' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
   target: string;
   details: Record<string, unknown>;
   occurredAt: string;
@@ -74,6 +74,7 @@ export interface ControlPlaneStore {
   publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
   registrySnapshot(version: number): Promise<RegistrySnapshot | undefined>;
   rollbackModels(input: { targetVersion: number; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
+  disableModel(input: { modelId: string; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
   budgetFor(tenantId: string): Promise<BudgetSnapshot>;
   setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot>;
   listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]>;

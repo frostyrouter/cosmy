@@ -94,6 +94,31 @@ describe('administrative HTTP API', () => {
     expect(audit.json().events).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'models.rollback', details: expect.objectContaining({ targetVersion, previousVersion: currentVersion, reason: 'restore full registry' }) })]));
   });
 
+  it('emergency-disables a model without permitting stale commands or disabling the last model', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const disable = (modelId: string, version: number, reason: string) => app!.inject({ method: 'POST', url: '/v1/admin/models/disable', headers: { ...headers, 'if-match': `${version}` }, payload: { modelId, reason } });
+    const first = await disable(defaultModels[0]!.id, 1, 'elevated provider errors');
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ version: 2, source: `disable:${defaultModels[0]!.id}` });
+    expect(first.json().models.find((model: { id: string }) => model.id === defaultModels[0]!.id).enabled).toBe(false);
+    const idempotent = await disable(defaultModels[0]!.id, 2, 'duplicate command');
+    expect(idempotent.json().version).toBe(2);
+    const stale = await disable(defaultModels[1]!.id, 1, 'stale operator view');
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe('registry_version_conflict');
+    const second = await disable(defaultModels[1]!.id, 2, 'continued incident');
+    expect(second.json().version).toBe(3);
+    const last = await disable(defaultModels[2]!.id, 3, 'unsafe command');
+    expect(last.statusCode).toBe(409);
+    expect(last.json().error.code).toBe('last_enabled_model');
+    const routed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { model: defaultModels[0]!.id, messages: [{ role: 'user', content: 'must not run on disabled model' }] } });
+    expect(routed.statusCode).toBe(422);
+    expect(routed.json().error.code).toBe('no_eligible_model');
+    const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers });
+    expect(audit.json().events.filter((event: { action: string }) => event.action === 'models.disable')).toHaveLength(2);
+  });
+
   it('pages through the complete audit history with an opaque stable cursor', async () => {
     app = await buildApp(config);
     const headers = { authorization: `Bearer ${adminKey}` };

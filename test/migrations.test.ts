@@ -29,6 +29,7 @@ describe('managed database migrations', () => {
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS api_credentials'))).toBe(true);
     expect(queries.some((query) => query.includes("'credential.create', 'credential.disable'"))).toBe(true);
     expect(queries.some((query) => query.includes("'models.publish', 'models.rollback'"))).toBe(true);
-    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(13);
+    expect(queries.some((query) => query.includes("'models.rollback', 'models.disable'"))).toBe(true);
+    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(14);
   });
 });

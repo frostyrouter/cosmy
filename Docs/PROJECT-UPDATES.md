@@ -1,5 +1,13 @@
 # Project updates
 
+## 2026-08-16 - Emergency model disable (commit pending)
+
+- Change: Added `POST /v1/admin/models/disable` as a targeted incident kill switch that creates a new registry snapshot while changing only the selected model's `enabled` lifecycle flag.
+- Safety: The operation requires current-version `If-Match`, serializes with publication and rollback, rejects missing models and stale commands, treats an already-disabled current model as an idempotent no-op, and cannot disable the last enabled model.
+- Audit: PostgreSQL commits `models.disable` with model identity, provider, previous version, and operator reason in the same transaction as the copied manifests. Migration 014 extends the constrained action set.
+- Runtime/latency: The local router activates the committed snapshot immediately and peers use existing polling. There is no added database call or computation on response routing.
+- Validation: 181 tests passed locally (22 PostgreSQL integration tests skipped without a database), including HTTP routing exclusion and stale/idempotent/last-model behavior; TypeScript lint, production build, and diff whitespace validation passed. Real-PostgreSQL concurrent-disable and last-model coverage is included for Compose CI.
+
 ## 2026-08-16 - Atomic model-registry rollback (commit pending)
 
 - Change: Added `POST /v1/admin/models/rollback` to restore a prior durable registry snapshot as a new monotonic version, with immediate local activation and normal cross-instance registry convergence.
