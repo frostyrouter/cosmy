@@ -242,6 +242,8 @@ High-impact actions such as credential rotation, provider enablement, policy rel
 
 Administrative audit reads use stable keyset pagination. `GET /v1/admin/audit` returns `events` and a nullable opaque `nextCursor`; pass that value as the next request's `cursor` without decoding or modifying it. Invalid cursors return `400 invalid_request`.
 
+`POST /v1/admin/models/rollback` restores a prior durable registry snapshot as a new monotonic version. It requires `admin:write`, an operator reason, and `If-Match` containing the current version so concurrent or repeated commands cannot silently overwrite a newer publication.
+
 ### Durable API credentials
 
 The implemented credential-management endpoints require `admin:write`:

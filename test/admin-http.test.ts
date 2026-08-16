@@ -72,6 +72,28 @@ describe('administrative HTTP API', () => {
     expect(audit.json().events[0]).toMatchObject({ actorCredentialId: 'admin', action: 'models.publish', details: { modelCount: 1 } });
   });
 
+  it('atomically rolls back to a durable registry version with optimistic concurrency', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const initial = await app.inject({ method: 'GET', url: '/v1/admin/models', headers });
+    const targetVersion = initial.json().version as number;
+    const published = await app.inject({ method: 'PUT', url: '/v1/admin/models', headers, payload: { source: 'reduced-registry', models: [defaultModels[0]] } });
+    const currentVersion = published.json().version as number;
+    const missingPrecondition = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers, payload: { targetVersion, reason: 'restore full registry' } });
+    expect(missingPrecondition.statusCode).toBe(428);
+    const malformedPrecondition = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers: { ...headers, 'if-match': `"${currentVersion}` }, payload: { targetVersion, reason: 'restore full registry' } });
+    expect(malformedPrecondition.statusCode).toBe(428);
+    const rolledBack = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers: { ...headers, 'if-match': `"${currentVersion}"` }, payload: { targetVersion, reason: 'restore full registry' } });
+    expect(rolledBack.statusCode).toBe(200);
+    expect(rolledBack.json()).toMatchObject({ version: currentVersion + 1, source: `rollback:${targetVersion}` });
+    expect(rolledBack.json().models).toHaveLength(defaultModels.length);
+    const staleRetry = await app.inject({ method: 'POST', url: '/v1/admin/models/rollback', headers: { ...headers, 'if-match': `${currentVersion}` }, payload: { targetVersion, reason: 'retry after lost response' } });
+    expect(staleRetry.statusCode).toBe(409);
+    expect(staleRetry.json().error.code).toBe('registry_version_conflict');
+    const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers });
+    expect(audit.json().events).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'models.rollback', details: expect.objectContaining({ targetVersion, previousVersion: currentVersion, reason: 'restore full registry' }) })]));
+  });
+
   it('pages through the complete audit history with an opaque stable cursor', async () => {
     app = await buildApp(config);
     const headers = { authorization: `Bearer ${adminKey}` };

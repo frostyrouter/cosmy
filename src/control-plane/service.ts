@@ -59,6 +59,16 @@ export class ControlPlaneService {
     return this.registry.load(snapshot);
   }
 
+  async rollbackModels(targetVersion: number, expectedCurrentVersion: number, reason: string, actor: RequestPrincipal) {
+    const target = await this.store.registrySnapshot(targetVersion);
+    if (!target) throw new RouterError('Registry rollback target was not found', 'registry_snapshot_not_found', 404, false);
+    if (!target.models.some((model) => model.enabled)) throw new RouterError('Registry rollback target has no enabled model', 'invalid_rollback_target', 409, false);
+    const unavailable = target.models.find((model) => model.enabled && !this.availableProviders.has(model.provider));
+    if (unavailable) throw new RouterError(`Rollback target enables model '${unavailable.id}' on unavailable provider '${unavailable.provider}'`, 'invalid_rollback_target', 409, false);
+    const snapshot = await this.store.rollbackModels({ targetVersion, expectedCurrentVersion, reason, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    return this.registry.load(snapshot);
+  }
+
   budgetFor(tenantId: string) { return this.store.budgetFor(tenantId); }
 
   setBudget(tenantId: string, limitUsd: number, actor: RequestPrincipal) {

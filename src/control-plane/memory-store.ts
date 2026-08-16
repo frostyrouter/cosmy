@@ -13,16 +13,38 @@ const maximumEvidenceRecordsPerVersion = 20;
 
 export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly audit: AuditEvent[] = [];
+  private readonly registryHistory = new Map<number, RegistrySnapshot>();
   private readonly evidence = new Map<string, ModelPromotionEvidence[]>();
   private readonly rollouts = new Map<string, ModelRollout>();
   private readonly shadowCampaigns = new Map<string, ShadowCampaign>();
   private readonly shadowReservations = new Map<string, { reservation: ShadowReservation; createdAtMs: number; reconciled: boolean }>();
 
-  constructor(private readonly registry: VersionedModelRegistry, private readonly budgets: BudgetAdministration) {}
+  constructor(private readonly registry: VersionedModelRegistry, private readonly budgets: BudgetAdministration) {
+    const initial = registry.currentSnapshot();
+    this.registryHistory.set(initial.version, structuredClone(initial));
+  }
 
   async publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
     const result = this.registry.publish(input.models, input.source);
+    this.registryHistory.set(result.version, structuredClone(result));
     this.record(input.actorCredentialId, input.actorTenantId, 'models.publish', `registry:${result.version}`, { source: input.source, modelCount: input.models.length });
+    return result;
+  }
+
+  async registrySnapshot(version: number): Promise<RegistrySnapshot | undefined> {
+    const value = this.registryHistory.get(version);
+    return value ? structuredClone(value) : undefined;
+  }
+
+  async rollbackModels(input: { targetVersion: number; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    const current = this.registry.currentSnapshot();
+    if (current.version !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying rollback', 'registry_version_conflict', 409, false);
+    if (input.targetVersion >= current.version) throw new RouterError('Rollback target must be older than the current registry version', 'invalid_rollback_target', 409, false);
+    const target = this.registryHistory.get(input.targetVersion);
+    if (!target) throw new RouterError('Registry rollback target was not found', 'registry_snapshot_not_found', 404, false);
+    const result = this.registry.publish(target.models, `rollback:${input.targetVersion}`);
+    this.registryHistory.set(result.version, structuredClone(result));
+    this.record(input.actorCredentialId, input.actorTenantId, 'models.rollback', `registry:${result.version}`, { targetVersion: input.targetVersion, previousVersion: current.version, reason: input.reason, modelCount: result.models.length });
     return result;
   }
 

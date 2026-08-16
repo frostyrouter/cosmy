@@ -47,6 +47,22 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     ]));
   });
 
+  it('serializes registry rollback and copies a prior snapshot with its audit event', async () => {
+    const actor = { actorCredentialId: 'control-admin', actorTenantId: 'platform' };
+    await control.submitEvidence({ modelId: defaultModels[0]!.id, modelVersion: defaultModels[0]!.version, suiteVersion: 'suite-1', datasetVersion: 'dataset-1', conformancePassed: true, pricingVerified: true, usageVerified: true, routingPassRate: 0.99, qualityScore: 0.9, sampleCount: 200, evaluatedAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(), ...actor });
+    const target = await control.publishModels({ models: defaultModels.slice(0, 1), source: 'rollback-target', ...actor });
+    const current = await control.publishModels({ models: defaultModels.slice(0, 1), source: 'rollback-current', ...actor });
+    const attempts = await Promise.allSettled([
+      control.rollbackModels({ targetVersion: target.version, expectedCurrentVersion: current.version, reason: 'incident', ...actor }),
+      control.rollbackModels({ targetVersion: target.version, expectedCurrentVersion: current.version, reason: 'duplicate incident command', ...actor }),
+    ]);
+    expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const restored = attempts.find((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof control.rollbackModels>>> => result.status === 'fulfilled')!.value;
+    expect(restored).toMatchObject({ version: current.version + 1, source: `rollback:${target.version}`, models: target.models });
+    await expect(control.listAudit(10)).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ action: 'models.rollback', target: `registry:${restored.version}`, details: expect.objectContaining({ targetVersion: target.version, previousVersion: current.version, reason: 'incident' }) })]));
+  });
+
   it('rejects a new enabled version without passing evidence', async () => {
     const candidate = { ...structuredClone(defaultModels[0]!), id: 'postgres-candidate', version: '2' };
     await expect(control.publishModels({ models: [candidate], source: 'missing-evidence', actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'promotion_gate_failed', statusCode: 409 });

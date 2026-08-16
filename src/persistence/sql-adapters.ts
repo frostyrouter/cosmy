@@ -229,6 +229,33 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  async registrySnapshot(version: number): Promise<RegistrySnapshot | undefined> {
+    const result = await this.db.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots WHERE version = $1', [version]);
+    const row = result.rows[0];
+    if (!row) return undefined;
+    const manifests = await this.db.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = $1 ORDER BY model_id', [version]);
+    return snapshot(row, manifests.rows.map((entry) => entry.manifest));
+  }
+
+  async rollbackModels(input: { targetVersion: number; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:registry-publish'))");
+      const current = (await tx.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots ORDER BY version DESC LIMIT 1')).rows[0];
+      if (!current || Number(current.version) !== input.expectedCurrentVersion) throw new RouterError('Registry version changed; reload before retrying rollback', 'registry_version_conflict', 409, false);
+      if (input.targetVersion >= Number(current.version)) throw new RouterError('Rollback target must be older than the current registry version', 'invalid_rollback_target', 409, false);
+      const target = (await tx.query<SnapshotRow>('SELECT version, source, created_at FROM model_registry_snapshots WHERE version = $1', [input.targetVersion])).rows[0];
+      if (!target) throw new RouterError('Registry rollback target was not found', 'registry_snapshot_not_found', 404, false);
+      const manifests = await tx.query<ManifestRow>('SELECT model_id, manifest FROM model_manifests WHERE snapshot_version = $1 ORDER BY model_id', [input.targetVersion]);
+      if (manifests.rows.length === 0) throw new RouterError('Registry rollback target has no manifests', 'invalid_rollback_target', 409, false);
+      const inserted = (await tx.query<SnapshotRow>('INSERT INTO model_registry_snapshots (source) VALUES ($1) RETURNING version, source, created_at', [`rollback:${input.targetVersion}`])).rows[0];
+      if (!inserted) throw new Error('Registry rollback snapshot insert returned no row');
+      for (const entry of manifests.rows) await tx.query('INSERT INTO model_manifests (snapshot_version, model_id, provider, model_name, manifest) VALUES ($1, $2, $3, $4, $5)', [inserted.version, entry.model_id, entry.manifest.provider, entry.manifest.model, JSON.stringify(entry.manifest)]);
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'models.rollback', `registry:${inserted.version}`, { targetVersion: input.targetVersion, previousVersion: Number(current.version), reason: input.reason, modelCount: manifests.rows.length });
+      return snapshot(inserted, manifests.rows.map((entry) => entry.manifest));
+    });
+  }
+
   async budgetFor(tenantId: string): Promise<BudgetSnapshot> {
     const result = await this.db.query<BudgetRow>('SELECT tenant_id, limit_usd, reserved_usd, spent_usd FROM tenant_budgets WHERE tenant_id = $1', [tenantId]);
     const row = result.rows[0];

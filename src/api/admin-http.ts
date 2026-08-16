@@ -24,6 +24,7 @@ const modelSchema = z.object({
 }).strict();
 
 const publishSchema = z.object({ source: z.string().min(1).max(200), models: z.array(modelSchema).min(1).max(1_000) }).strict();
+const rollbackSchema = z.object({ targetVersion: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), reason: z.string().min(1).max(500) }).strict();
 const budgetSchema = z.object({ limitUsd: z.number().nonnegative().max(1_000_000_000) }).strict();
 const tenantSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), cursor: z.string().min(1).max(512).optional() }).strict();
@@ -69,6 +70,15 @@ function sendError(reply: FastifyReply, error: unknown) {
   throw error;
 }
 
+function requiredRegistryVersion(value: string | string[] | undefined): number {
+  const text = Array.isArray(value) ? value[0] : value;
+  const match = text?.match(/^(?:"([1-9][0-9]*)"|([1-9][0-9]*))$/u);
+  if (!match) throw new RouterError('Registry rollback requires If-Match with the current registry version', 'precondition_required', 428, false);
+  const version = Number(match[1] ?? match[2]);
+  if (!Number.isSafeInteger(version)) throw new RouterError('If-Match registry version is invalid', 'invalid_request', 400, false);
+  return version;
+}
+
 export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneService, authenticator?: RequestAuthenticator): void {
   app.get('/v1/admin/credentials', async (request, reply) => {
     try { requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return { credentials: await service.listCredentials() }; } catch (error) { return sendError(reply, error); }
@@ -97,6 +107,14 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
       const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = publishSchema.parse(request.body);
       return await service.publishModels(input.models as readonly ModelConfiguration[], input.source, actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/models/rollback', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const input = rollbackSchema.parse(request.body);
+      return await service.rollbackModels(input.targetVersion, requiredRegistryVersion(request.headers['if-match']), input.reason, actor);
     } catch (error) { return sendError(reply, error); }
   });
 

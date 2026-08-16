@@ -1,5 +1,13 @@
 # Project updates
 
+## 2026-08-16 - Atomic model-registry rollback (commit pending)
+
+- Change: Added `POST /v1/admin/models/rollback` to restore a prior durable registry snapshot as a new monotonic version, with immediate local activation and normal cross-instance registry convergence.
+- Safety: Rollback requires `If-Match` with the current version, rejects current/future/missing targets and unavailable enabled providers, and serializes against publication so duplicate or stale incident commands cannot overwrite newer state.
+- Audit: PostgreSQL copies target manifests and commits `models.rollback` with target/previous version, operator reason, and model count in the same transaction. Migration 013 extends the constrained audit action set.
+- Latency: This is an administrative-only database workflow and adds no work to request routing, provider execution, or authentication.
+- Validation: 180 tests passed locally (21 PostgreSQL integration tests skipped without a database), including HTTP precondition/stale-retry/history restoration; TypeScript lint, production build, and diff whitespace validation passed. Real-PostgreSQL concurrent rollback and atomic-audit coverage is included for Compose CI.
+
 ## 2026-08-16 - Stable administrative audit pagination (commit pending)
 
 - Change: `GET /v1/admin/audit` now returns a nullable opaque `nextCursor` and accepts that cursor to traverse the complete administrative history beyond the former newest-500 ceiling.
