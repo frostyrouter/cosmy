@@ -8,6 +8,7 @@
 - Operations: Apply migration 011. Malformed transport/schema requests and authentication/rate-limit failures remain pre-routing admission telemetry, not routing decisions. Candidate history aggregates provider-internal retries.
 - Validation: 174 tests passed locally (17 PostgreSQL tests skipped without a database), plus TypeScript lint, production build, diff whitespace validation, and a 20,000-request benchmark with zero errors. The benchmark produced about 624 requests/second and 126.5 ms p95 on this development host; repeated samples showed substantial host contention, so deployment load testing—not this laptop result—remains the latency release gate. Real-PostgreSQL rejection/attempt coverage is included for CI.
 - Limitation: A process crash after provider work but before the terminal decision update leaves the planned route but cannot reconstruct in-memory attempt history; per-attempt synchronous writes were intentionally avoided on the latency-sensitive path.
+- CI correction: The PostgreSQL behavior and migration passed, but the first Compose run exposed a test matcher that expected an omitted optional `route` property to exist as `undefined`. The assertion now verifies absence separately, matching the serialized API contract.
 
 ## 2026-08-12 - Shared PostgreSQL provider health (commit pending)
 

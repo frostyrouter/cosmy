@@ -123,7 +123,9 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
       rejection: { code: 'no_eligible_model', statusCode: 422, retryable: false, candidates: [{ modelId: 'candidate', reason: 'max_cost_exceeded' }] },
     };
     await decisions.save(rejected);
-    await expect(decisions.get('control-tenant', rejected.id)).resolves.toMatchObject({ state: 'rejected', route: undefined, attempts: [], rejection: { candidates: [{ reason: 'max_cost_exceeded' }] } });
+    const storedRejection = await decisions.get('control-tenant', rejected.id);
+    expect(storedRejection).toMatchObject({ state: 'rejected', attempts: [], rejection: { candidates: [{ reason: 'max_cost_exceeded' }] } });
+    expect(storedRejection?.route).toBeUndefined();
 
     const completed = newDecisionRecord({ id: 'control-attempts', tenantId: 'control-tenant', state: 'completed', attempts: [{ index: 0, modelId: 'candidate', model: 'candidate-v1', provider: 'provider-a', status: 'failed', latencyMs: 12, startedAt: '2026-08-12T00:00:00.000Z', completedAt: '2026-08-12T00:00:00.012Z', errorCode: 'provider_error' }] });
     await decisions.save(completed);
