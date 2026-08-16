@@ -30,6 +30,8 @@ describe('managed database migrations', () => {
     expect(queries.some((query) => query.includes("'credential.create', 'credential.disable'"))).toBe(true);
     expect(queries.some((query) => query.includes("'models.publish', 'models.rollback'"))).toBe(true);
     expect(queries.some((query) => query.includes("'models.rollback', 'models.disable'"))).toBe(true);
-    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(14);
+    expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS tenant_policies'))).toBe(true);
+    expect(queries.some((query) => query.includes("'budget.set', 'policy.set'"))).toBe(true);
+    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(15);
   });
 });

@@ -32,6 +32,7 @@ import { ControlPlaneService } from './control-plane/service.js';
 import { InMemoryRolloutRegistry, type RolloutOutcome } from './rollouts/rollout.js';
 import type { ControlPlaneStore, CredentialStore } from './persistence/contracts.js';
 import { ShadowCoordinator } from './shadow/coordinator.js';
+import { ReloadableTenantPolicyResolver } from './policy/tenant-policy.js';
 
 export interface AppDependencies {
   registry?: ModelRegistry;
@@ -161,6 +162,14 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   const controlStore: ControlPlaneStore | undefined = registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))
     ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres, shadowPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
     : undefined;
+  const tenantPolicies = new ReloadableTenantPolicyResolver();
+  let policyRefreshGeneration = 0;
+  const refreshPolicies = controlStore ? async () => {
+    const generation = ++policyRefreshGeneration;
+    const snapshot = await controlStore.listTenantPolicies();
+    if (generation === policyRefreshGeneration) tenantPolicies.replace(snapshot);
+  } : undefined;
+  await refreshPolicies?.();
   if (controlStore) rolloutRegistry.load(await controlStore.runtimeRollouts());
   const shadowCoordinator = controlStore ? new ShadowCoordinator(controlStore, registry, providerAdapters, metrics, 4, 1_000, Math.min(config.requestTimeoutMs, 30_000)) : undefined;
   if (shadowCoordinator && controlStore) shadowCoordinator.load(await controlStore.activeShadowCampaigns());
@@ -190,7 +199,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
   const decisions = dependencies.decisions ?? (postgres ? new PostgresDecisionStore(postgres) : new InMemoryDecisionStore());
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator, decisions, config.requestTimeoutMs), readyCheck, authenticator);
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator, decisions, config.requestTimeoutMs), readyCheck, authenticator, tenantPolicies);
   registerDiagnosticsRoute(app, async () => {
     const current = (registry as { currentSnapshot?: () => { version: number; source: string; createdAt: string } }).currentSnapshot?.();
     const models = registry.snapshot();
@@ -203,7 +212,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     };
   }, authenticator);
   if (controlStore && registry instanceof InMemoryModelRegistry) {
-    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name)), rolloutRegistry, shadowCoordinator, credentialStore, refreshCredentials), authenticator);
+    registerAdminRoutes(app, new ControlPlaneService(controlStore, registry, new Set(providerAdapters.map((provider) => provider.name)), rolloutRegistry, shadowCoordinator, credentialStore, refreshCredentials, refreshPolicies), authenticator);
   }
   if (registryRepository && registry instanceof InMemoryModelRegistry) {
     const refreshSeconds = config.registryRefreshSeconds ?? 15;
@@ -238,6 +247,17 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
       const refresh = refreshCredentials;
       const timer = setInterval(() => {
         void refresh().catch((error: unknown) => { metrics.increment?.('credential_refresh_failure'); app.log.error({ err: error }, 'credential refresh failed'); });
+      }, refreshSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
+  if (refreshPolicies) {
+    const refreshSeconds = config.policyRefreshSeconds ?? 2;
+    if (refreshSeconds > 0) {
+      const refresh = refreshPolicies;
+      const timer = setInterval(() => {
+        void refresh().catch((error: unknown) => { metrics.increment?.('policy_refresh_failure'); app.log.error({ err: error }, 'tenant policy refresh failed'); });
       }, refreshSeconds * 1_000);
       timer.unref();
       app.addHook('onClose', async () => { clearInterval(timer); });

@@ -1,5 +1,14 @@
 # Project updates
 
+## 2026-08-16 - Durable tenant policy bundles (commit pending)
+
+- Change: Added versioned PostgreSQL/in-memory tenant policies with admin read/replace endpoints, provider/model allow/deny controls, region/data-class boundaries, cost/latency/quality limits, and fallback control.
+- Invariant: Requests may only tighten operator policy—allowlists intersect, denylists union, maxima choose the lower value, quality chooses the higher value, and either side may disable fallback. Model discovery and explicit model routing use the same visibility rules.
+- Consistency: Local updates refresh immediately; peers poll at `POLICY_REFRESH_SECONDS` (default 2) with stale-refresh generation protection. Failures preserve the last-known-good snapshot and increment `policy_refresh_failure`.
+- Latency/evidence: The response path uses an in-memory tenant lookup and bounded set operations with no policy database read. Decisions include the tenant policy version for replay and audit correlation.
+- Persistence/security: Tenant-specific advisory locks and required `If-Match` prevent lost updates; `policy.set` audit commits in the same transaction. Migration 015 constrains stored values.
+- Validation: 185 tests passed locally (23 PostgreSQL integration tests skipped without a database), including resolution/non-relaxation, fail-closed class/region, model discovery, HTTP enforcement/version/reason/audit, config, and migration coverage; TypeScript lint, production build, and diff whitespace validation passed. A 20,000-request benchmark completed with zero errors at about 632 requests/second and 125.1 ms p95 on this development host; deployment load testing remains the release authority. Real-PostgreSQL concurrency and cross-instance convergence coverage is included for Compose CI.
+
 ## 2026-08-16 - Emergency model disable (commit pending)
 
 - Change: Added `POST /v1/admin/models/disable` as a targeted incident kill switch that creates a new registry snapshot while changing only the selected model's `enabled` lifecycle flag.

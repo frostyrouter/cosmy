@@ -75,6 +75,8 @@ interface RoutingControls {
 }
 ```
 
+Implementation note: `allowedProviders`, `deniedProviders`, `allowedModels`, `deniedModels`, and `allowedRegions` are supported request-level tightening controls. Durable operator bundles additionally constrain allowed data classes, cost, latency, quality, and fallback. Request and durable values are resolved so callers cannot relax the operator policy; see [durable tenant policy bundles](38-durable-tenant-policy-bundles.md).
+
 ## Non-streaming response
 
 ```json
@@ -245,6 +247,8 @@ Administrative audit reads use stable keyset pagination. `GET /v1/admin/audit` r
 `POST /v1/admin/models/rollback` restores a prior durable registry snapshot as a new monotonic version. It requires `admin:write`, an operator reason, and `If-Match` containing the current version so concurrent or repeated commands cannot silently overwrite a newer publication.
 
 `POST /v1/admin/models/disable` creates a new snapshot with one model removed from route admission. It requires the same precondition and reason, is idempotent against an already-disabled current model, and refuses to disable the final enabled model.
+
+`GET`/`PUT /v1/admin/tenants/{tenantId}/policy` read and replace versioned tenant routing constraints. Creation uses `If-Match: 0`; stale updates return `409`. The route decision's policy version includes the applied tenant bundle version.
 
 ### Durable API credentials
 

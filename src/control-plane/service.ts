@@ -8,9 +8,10 @@ import type { InMemoryRolloutRegistry, ModelRollout, RolloutOutcome } from '../r
 import type { ShadowCampaign } from '../shadow/shadow.js';
 import type { ShadowCoordinator } from '../shadow/coordinator.js';
 import { decodeAuditCursor, encodeAuditCursor } from './audit-pagination.js';
+import type { TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 export class ControlPlaneService {
-  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator, private readonly credentials?: CredentialStore, private readonly refreshCredentials?: () => Promise<void>) {}
+  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator, private readonly credentials?: CredentialStore, private readonly refreshCredentials?: () => Promise<void>, private readonly refreshPolicies?: () => Promise<void>) {}
 
   snapshot() { return this.registry.currentSnapshot(); }
 
@@ -72,6 +73,14 @@ export class ControlPlaneService {
   async disableModel(modelId: string, expectedCurrentVersion: number, reason: string, actor: RequestPrincipal) {
     const snapshot = await this.store.disableModel({ modelId, expectedCurrentVersion, reason, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
     return this.registry.load(snapshot);
+  }
+
+  tenantPolicy(tenantId: string) { return this.store.tenantPolicy(tenantId); }
+
+  async setTenantPolicy(tenantId: string, expectedVersion: number, reason: string, constraints: TenantPolicyConstraints, actor: RequestPrincipal) {
+    const policy = await this.store.setTenantPolicy({ ...constraints, tenantId, expectedVersion, reason, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    await this.refreshPolicies?.();
+    return policy;
   }
 
   budgetFor(tenantId: string) { return this.store.budgetFor(tenantId); }

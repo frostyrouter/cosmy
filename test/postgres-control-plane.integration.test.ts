@@ -34,6 +34,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await db.query("DELETE FROM usage_reservations WHERE tenant_id = 'control-tenant'");
     await db.query("DELETE FROM tenant_budgets WHERE tenant_id = 'control-tenant' OR tenant_id LIKE 'control-audit-%'");
     await db.query("DELETE FROM api_credentials WHERE credential_id LIKE 'control-%'");
+    await db.query("DELETE FROM tenant_policies WHERE tenant_id LIKE 'control-%'");
   });
   afterAll(async () => { await db?.close(); });
 
@@ -83,6 +84,31 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     const latest = await control.registrySnapshot(oneLeft.version);
     expect(latest?.models.filter((model) => model.enabled)).toHaveLength(1);
     expect((await control.listAudit(20)).filter((event) => event.action === 'models.disable')).toHaveLength(2);
+  });
+
+  it('serializes tenant policy updates and converges a running router without hot-path database reads', async () => {
+    const actor = { actorCredentialId: 'control-admin', actorTenantId: 'platform' };
+    const attempts = await Promise.allSettled([
+      control.setTenantPolicy({ tenantId: 'control-policy-race', expectedVersion: 0, reason: 'race a', allowedModels: [defaultModels[0]!.id], ...actor }),
+      control.setTenantPolicy({ tenantId: 'control-policy-race', expectedVersion: 0, reason: 'race b', allowedModels: [defaultModels[1]!.id], ...actor }),
+    ]);
+    expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    await expect(control.tenantPolicy('control-policy-race')).resolves.toMatchObject({ version: 1 });
+
+    const credentials = new PostgresCredentialStore(db);
+    await credentials.createCredential({ id: 'control-policy-caller', tenantId: 'control-policy-live', keySha256: sha256ApiKey('control-policy-secret'), scopes: ['responses:create'], ...actor });
+    const app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', persistenceMode: 'postgres', databaseUrl: databaseUrl!, classifierMode: 'disabled', policyRefreshSeconds: 1 });
+    try {
+      const request = () => app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer control-policy-secret' }, payload: { model: defaultModels[0]!.id, messages: [{ role: 'user', content: 'policy convergence' }] } });
+      expect((await request()).statusCode).toBe(200);
+      await control.setTenantPolicy({ tenantId: 'control-policy-live', expectedVersion: 0, reason: 'restrict live router', allowedModels: [defaultModels[1]!.id], ...actor });
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      const rejected = await request();
+      expect(rejected.statusCode).toBe(422);
+      expect(rejected.json().error.code).toBe('no_eligible_model');
+    } finally { await app.close(); }
+    expect((await control.listAudit(20)).filter((event) => event.action === 'policy.set')).toHaveLength(2);
   });
 
   it('rejects a new enabled version without passing evidence', async () => {

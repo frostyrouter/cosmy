@@ -88,6 +88,10 @@ export function filterEligible(
   const rejected: Rejection[] = [];
   for (const model of models) {
     if (!model.enabled) { reject(rejected, model, 'model_disabled'); continue; }
+    if (hints.allowedProviders && !hints.allowedProviders.includes(model.provider)) { reject(rejected, model, 'provider_not_allowed'); continue; }
+    if (hints.deniedProviders?.includes(model.provider)) { reject(rejected, model, 'provider_denied'); continue; }
+    if (hints.allowedModels && !hints.allowedModels.includes(model.id)) { reject(rejected, model, 'model_not_allowed'); continue; }
+    if (hints.deniedModels?.includes(model.id)) { reject(rejected, model, 'model_denied'); continue; }
     if (hints.preferProvider && model.provider !== hints.preferProvider) { reject(rejected, model, 'provider_preference'); continue; }
     if (features.inputTokens + features.requestedOutputTokens > model.contextWindow) { reject(rejected, model, 'context_window'); continue; }
     if (features.requestedOutputTokens > model.maxOutputTokens) { reject(rejected, model, 'max_output_tokens'); continue; }
@@ -98,6 +102,7 @@ export function filterEligible(
     if (features.modalities.some((modality) => !model.modalities.includes(modality))) { reject(rejected, model, 'modality_unsupported'); continue; }
     if (!model.allowedDataClasses.includes(features.dataClass)) { reject(rejected, model, 'data_class_forbidden'); continue; }
     if (hints.region && !model.regions.includes('global') && !model.regions.includes(hints.region)) { reject(rejected, model, 'region_unavailable'); continue; }
+    if (!hints.region && hints.allowedRegions && !model.regions.includes('global') && !hints.allowedRegions.some((region) => model.regions.includes(region))) { reject(rejected, model, 'region_forbidden'); continue; }
     const estimatedCostUsd = cost(model, features);
     if (hints.maxCostUsd !== undefined && estimatedCostUsd > hints.maxCostUsd) { reject(rejected, model, 'max_cost_exceeded'); continue; }
     if (hints.maxLatencyMs !== undefined && model.health.latencyP95Ms > hints.maxLatencyMs) { reject(rejected, model, 'max_latency_exceeded'); continue; }

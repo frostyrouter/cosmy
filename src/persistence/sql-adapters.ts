@@ -6,6 +6,7 @@ import { RouterError } from '../domain/errors.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
+import type { TenantPolicyBundle, TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 export interface SqlResult<Row> { rows: Row[]; }
 export interface SqlClient {
@@ -20,6 +21,7 @@ interface UsageTotalsRow { reserved_usd: string | number; spent_usd: string | nu
 interface BudgetRow { tenant_id: string; limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; }
 interface IdempotencyRow { request_hash: string; status: 'processing' | 'completed'; response_json: ResponseResult | null; }
 interface AuditRow { id: string; actor_credential_id: string; actor_tenant_id: string; action: AuditEvent['action']; target: string; details: Record<string, unknown>; occurred_at: string; }
+interface TenantPolicyRow { tenant_id: string; version: string | number; allowed_providers: string[] | null; denied_providers: string[] | null; allowed_models: string[] | null; denied_models: string[] | null; allowed_regions: string[] | null; allowed_data_classes: TenantPolicyBundle['allowedDataClasses'] | null; max_cost_usd: string | number | null; max_latency_ms: string | number | null; min_quality: string | number | null; allow_fallback: boolean | null; created_at: string | Date; updated_at: string | Date; }
 interface EvidenceRow { id: string; model_id: string; model_version: string; suite_version: string; dataset_version: string; conformance_passed: boolean; pricing_verified: boolean; usage_verified: boolean; routing_pass_rate: number; quality_score: number; sample_count: number; evaluated_at: string; expires_at: string; submitted_by_credential_id: string; submitted_at: string; }
 interface RolloutRow { id: string; model_id: string; model_version: string; state: ModelRollout['state']; traffic_percentage: number; minimum_samples: number; maximum_error_rate: number; maximum_average_latency_ms: number; sample_count: string | number; error_count: string | number; total_latency_ms: number; reason: string | null; created_at: string; updated_at: string; }
 interface ShadowCampaignRow { id: string; model_id: string; model_version: string; state: ShadowCampaign['state']; sample_percentage: number; budget_limit_usd: string | number; reserved_usd: string | number; spent_usd: string | number; allowed_data_classes: ShadowCampaign['allowedDataClasses']; sample_count: string | number; success_count: string | number; error_count: string | number; created_at: string; updated_at: string; }
@@ -177,6 +179,19 @@ function auditEvent(row: AuditRow): AuditEvent {
   };
 }
 
+function tenantPolicy(row: TenantPolicyRow): TenantPolicyBundle {
+  return {
+    tenantId: row.tenant_id, version: Number(row.version), createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+    ...(row.allowed_providers ? { allowedProviders: [...row.allowed_providers] } : {}), ...(row.denied_providers ? { deniedProviders: [...row.denied_providers] } : {}),
+    ...(row.allowed_models ? { allowedModels: [...row.allowed_models] } : {}), ...(row.denied_models ? { deniedModels: [...row.denied_models] } : {}),
+    ...(row.allowed_regions ? { allowedRegions: [...row.allowed_regions] } : {}), ...(row.allowed_data_classes ? { allowedDataClasses: [...row.allowed_data_classes] } : {}),
+    ...(row.max_cost_usd === null ? {} : { maxCostUsd: Number(row.max_cost_usd) }), ...(row.max_latency_ms === null ? {} : { maxLatencyMs: Number(row.max_latency_ms) }),
+    ...(row.min_quality === null ? {} : { minQuality: Number(row.min_quality) }), ...(row.allow_fallback === null ? {} : { allowFallback: row.allow_fallback }),
+  };
+}
+
+const tenantPolicyColumns = 'tenant_id, version, allowed_providers, denied_providers, allowed_models, denied_models, allowed_regions, allowed_data_classes, max_cost_usd, max_latency_ms, min_quality, allow_fallback, created_at, updated_at';
+
 function promotionEvidence(row: EvidenceRow): ModelPromotionEvidence {
   return {
     id: row.id, modelId: row.model_id, modelVersion: row.model_version, suiteVersion: row.suite_version, datasetVersion: row.dataset_version,
@@ -273,6 +288,30 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
       for (const model of models) await tx.query('INSERT INTO model_manifests (snapshot_version, model_id, provider, model_name, manifest) VALUES ($1, $2, $3, $4, $5)', [inserted.version, model.id, model.provider, model.model, JSON.stringify(model)]);
       await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'models.disable', `registry:${inserted.version}`, { modelId: target.manifest.id, modelVersion: target.manifest.version, provider: target.manifest.provider, previousVersion: Number(current.version), reason: input.reason });
       return snapshot(inserted, models);
+    });
+  }
+
+  async listTenantPolicies(): Promise<readonly TenantPolicyBundle[]> {
+    const result = await this.db.query<TenantPolicyRow>(`SELECT ${tenantPolicyColumns} FROM tenant_policies ORDER BY tenant_id`);
+    return result.rows.map(tenantPolicy);
+  }
+
+  async tenantPolicy(tenantId: string): Promise<TenantPolicyBundle | undefined> {
+    const row = (await this.db.query<TenantPolicyRow>(`SELECT ${tenantPolicyColumns} FROM tenant_policies WHERE tenant_id = $1`, [tenantId])).rows[0];
+    return row ? tenantPolicy(row) : undefined;
+  }
+
+  async setTenantPolicy(input: TenantPolicyConstraints & { tenantId: string; expectedVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<TenantPolicyBundle> {
+    if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
+    return this.db.transaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtext('cosmy:tenant-policy:' || $1))", [input.tenantId]);
+      const existing = (await tx.query<{ version: string | number }>('SELECT version FROM tenant_policies WHERE tenant_id = $1 FOR UPDATE', [input.tenantId])).rows[0];
+      const currentVersion = Number(existing?.version ?? 0);
+      if (currentVersion !== input.expectedVersion) throw new RouterError('Tenant policy version changed; reload before retrying', 'policy_version_conflict', 409, false);
+      const row = (await tx.query<TenantPolicyRow>(`INSERT INTO tenant_policies (tenant_id, version, allowed_providers, denied_providers, allowed_models, denied_models, allowed_regions, allowed_data_classes, max_cost_usd, max_latency_ms, min_quality, allow_fallback) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (tenant_id) DO UPDATE SET version = EXCLUDED.version, allowed_providers = EXCLUDED.allowed_providers, denied_providers = EXCLUDED.denied_providers, allowed_models = EXCLUDED.allowed_models, denied_models = EXCLUDED.denied_models, allowed_regions = EXCLUDED.allowed_regions, allowed_data_classes = EXCLUDED.allowed_data_classes, max_cost_usd = EXCLUDED.max_cost_usd, max_latency_ms = EXCLUDED.max_latency_ms, min_quality = EXCLUDED.min_quality, allow_fallback = EXCLUDED.allow_fallback, updated_at = now() RETURNING ${tenantPolicyColumns}`, [input.tenantId, currentVersion + 1, input.allowedProviders ?? null, input.deniedProviders ?? null, input.allowedModels ?? null, input.deniedModels ?? null, input.allowedRegions ?? null, input.allowedDataClasses ?? null, input.maxCostUsd ?? null, input.maxLatencyMs ?? null, input.minQuality ?? null, input.allowFallback ?? null])).rows[0];
+      if (!row) throw new Error('Tenant policy update returned no row');
+      await this.appendAudit(tx, input.actorCredentialId, input.actorTenantId, 'policy.set', `tenant:${input.tenantId}`, { version: currentVersion + 1, reason: input.reason });
+      return tenantPolicy(row);
     });
   }
 

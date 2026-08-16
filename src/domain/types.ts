@@ -44,12 +44,18 @@ export interface ResponseFormat {
 
 export interface PolicyHints {
   tenantId?: string;
+  tenantPolicyVersion?: number;
   dataClass?: DataClass;
   region?: string;
+  allowedRegions?: string[];
   maxCostUsd?: number;
   maxLatencyMs?: number;
   minQuality?: number;
   preferProvider?: string;
+  allowedProviders?: string[];
+  deniedProviders?: string[];
+  allowedModels?: string[];
+  deniedModels?: string[];
   requireCapabilities?: Capability[];
   allowFallback?: boolean;
 }

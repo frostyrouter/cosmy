@@ -4,6 +4,7 @@ import type { ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
 import type { ApiCredential, ApiScope } from '../security/auth.js';
+import type { TenantPolicyBundle, TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 export interface ManagedApiCredential extends ApiCredential {
   createdAt: string;
@@ -62,7 +63,7 @@ export interface AuditEvent {
   id: string;
   actorCredentialId: string;
   actorTenantId: string;
-  action: 'models.publish' | 'models.rollback' | 'models.disable' | 'budget.set' | 'credential.create' | 'credential.disable' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
+  action: 'models.publish' | 'models.rollback' | 'models.disable' | 'budget.set' | 'policy.set' | 'credential.create' | 'credential.disable' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
   target: string;
   details: Record<string, unknown>;
   occurredAt: string;
@@ -75,6 +76,9 @@ export interface ControlPlaneStore {
   registrySnapshot(version: number): Promise<RegistrySnapshot | undefined>;
   rollbackModels(input: { targetVersion: number; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
   disableModel(input: { modelId: string; expectedCurrentVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
+  listTenantPolicies(): Promise<readonly TenantPolicyBundle[]>;
+  tenantPolicy(tenantId: string): Promise<TenantPolicyBundle | undefined>;
+  setTenantPolicy(input: TenantPolicyConstraints & { tenantId: string; expectedVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<TenantPolicyBundle>;
   budgetFor(tenantId: string): Promise<BudgetSnapshot>;
   setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot>;
   listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]>;

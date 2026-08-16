@@ -91,6 +91,10 @@ export class DeterministicRouter {
 
   get policyVersion(): string { return this.policy.version; }
 
+  private policyVersionFor(request: ResponseRequest): string {
+    return request.policy?.tenantPolicyVersion === undefined ? this.policy.version : `${this.policy.version}:tenant-${request.policy.tenantPolicyVersion}`;
+  }
+
   listModels(tenantId?: string): readonly ModelConfiguration[] {
     const observed = new Map(this.health?.snapshot().map((snapshot) => [snapshot.modelId, snapshot]) ?? []);
     return this.registry.snapshot().filter((model) => model.enabled && (!this.admission || this.admission.allows(model, tenantId)))
@@ -139,7 +143,7 @@ export class DeterministicRouter {
       const selected = rankCandidates(eligibility.eligible, features, request.policy, this.policy)[0];
       if (!selected) throw new NoRouteError('Requested model cannot satisfy this request');
       if (features.deepReasoningRequired === true && !supportsReasoning(selected)) throw new NoRouteError('Requested model cannot satisfy deep reasoning requirement', [...eligibility.rejected, { modelId: selected.model.id, reason: 'deep_reasoning_required' }]);
-      return { requestId, selected, alternatives: [], rejected: eligibility.rejected, features, policyVersion: this.policy.version, createdAt: nowIso(), metadata: routeMetadata(classificationStatus, selected.model.id, selected.model.id, false) };
+      return { requestId, selected, alternatives: [], rejected: eligibility.rejected, features, policyVersion: this.policyVersionFor(request), createdAt: nowIso(), metadata: routeMetadata(classificationStatus, selected.model.id, selected.model.id, false) };
     }
     const allModels = this.registry.snapshot();
     const rolloutRejected = this.admission ? allModels.filter((model) => !this.admission!.allows(model, tenantId)).map((model) => ({ modelId: model.id, reason: 'rollout_not_assigned' })) : [];
@@ -163,7 +167,7 @@ export class DeterministicRouter {
       }
       alternatives = reasoningCandidates.filter((candidate) => candidate.model.id !== selected.model.id).slice(0, 2);
     }
-    return { requestId, selected, alternatives, rejected: eligibility.rejected, features, policyVersion: this.policy.version, createdAt: nowIso(), metadata: routeMetadata(classificationStatus, initial.model.id, selected.model.id, promoted) };
+    return { requestId, selected, alternatives, rejected: eligibility.rejected, features, policyVersion: this.policyVersionFor(request), createdAt: nowIso(), metadata: routeMetadata(classificationStatus, initial.model.id, selected.model.id, promoted) };
   }
 }
 

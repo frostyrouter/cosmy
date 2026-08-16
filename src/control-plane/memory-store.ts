@@ -7,6 +7,7 @@ import type { ModelPromotionEvidence } from './promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import { RouterError } from '../domain/errors.js';
 import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
+import type { TenantPolicyBundle, TenantPolicyConstraints } from '../policy/tenant-policy.js';
 
 const maximumEvidenceVersions = 10_000;
 const maximumEvidenceRecordsPerVersion = 20;
@@ -14,6 +15,7 @@ const maximumEvidenceRecordsPerVersion = 20;
 export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly audit: AuditEvent[] = [];
   private readonly registryHistory = new Map<number, RegistrySnapshot>();
+  private readonly tenantPolicies = new Map<string, TenantPolicyBundle>();
   private readonly evidence = new Map<string, ModelPromotionEvidence[]>();
   private readonly rollouts = new Map<string, ModelRollout>();
   private readonly shadowCampaigns = new Map<string, ShadowCampaign>();
@@ -60,6 +62,24 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     this.registryHistory.set(result.version, structuredClone(result));
     this.record(input.actorCredentialId, input.actorTenantId, 'models.disable', `registry:${result.version}`, { modelId: target.id, modelVersion: target.version, provider: target.provider, previousVersion: current.version, reason: input.reason });
     return result;
+  }
+
+  async listTenantPolicies(): Promise<readonly TenantPolicyBundle[]> { return [...this.tenantPolicies.values()].map((policy) => structuredClone(policy)); }
+
+  async tenantPolicy(tenantId: string): Promise<TenantPolicyBundle | undefined> {
+    const policy = this.tenantPolicies.get(tenantId);
+    return policy ? structuredClone(policy) : undefined;
+  }
+
+  async setTenantPolicy(input: TenantPolicyConstraints & { tenantId: string; expectedVersion: number; reason: string; actorCredentialId: string; actorTenantId: string }): Promise<TenantPolicyBundle> {
+    const current = this.tenantPolicies.get(input.tenantId);
+    if ((current?.version ?? 0) !== input.expectedVersion) throw new RouterError('Tenant policy version changed; reload before retrying', 'policy_version_conflict', 409, false);
+    const now = nowIso();
+    const { expectedVersion: _expectedVersion, reason, actorCredentialId, actorTenantId, ...constraints } = input;
+    const policy: TenantPolicyBundle = { ...constraints, version: (current?.version ?? 0) + 1, createdAt: current?.createdAt ?? now, updatedAt: now };
+    this.tenantPolicies.set(input.tenantId, structuredClone(policy));
+    this.record(actorCredentialId, actorTenantId, 'policy.set', `tenant:${input.tenantId}`, { version: policy.version, reason });
+    return structuredClone(policy);
   }
 
   budgetFor(tenantId: string): Promise<BudgetSnapshot> { return this.budgets.budgetFor(tenantId); }

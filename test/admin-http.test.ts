@@ -9,7 +9,7 @@ const adminKey = 'admin-secret';
 const responseKey = 'response-secret';
 const credentials = [
   { id: 'admin', tenantId: 'platform', keySha256: sha256ApiKey(adminKey), scopes: ['admin:write' as const] },
-  { id: 'caller', tenantId: 'tenant-a', keySha256: sha256ApiKey(responseKey), scopes: ['responses:create' as const] },
+  { id: 'caller', tenantId: 'tenant-a', keySha256: sha256ApiKey(responseKey), scopes: ['responses:create' as const, 'routing:read' as const] },
 ];
 const config = { host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test' as const, requestTimeoutMs: 60_000, providerMaxRetries: 0, apiCredentials: credentials };
 
@@ -151,6 +151,34 @@ describe('administrative HTTP API', () => {
     expect(blocked.json().error.code).toBe('budget_exceeded');
     const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit', headers: adminHeaders });
     expect(audit.json().events[0]).toMatchObject({ action: 'budget.set', target: 'tenant:tenant-a' });
+  });
+
+  it('creates a versioned tenant policy that callers can tighten but never relax', async () => {
+    app = await buildApp(config);
+    const adminHeaders = { authorization: `Bearer ${adminKey}`, 'if-match': '0', 'x-change-reason': 'establish tenant boundary' };
+    const missingReason = await app.inject({ method: 'PUT', url: '/v1/admin/tenants/tenant-a/policy', headers: { authorization: `Bearer ${adminKey}`, 'if-match': '0' }, payload: { allowedModels: [defaultModels[0]!.id] } });
+    expect(missingReason.statusCode).toBe(428);
+    const created = await app.inject({ method: 'PUT', url: '/v1/admin/tenants/tenant-a/policy', headers: adminHeaders, payload: { allowedModels: [defaultModels[0]!.id], allowedDataClasses: ['public', 'internal'], maxCostUsd: 1, allowFallback: false } });
+    expect(created.statusCode).toBe(200);
+    expect(created.json()).toMatchObject({ tenantId: 'tenant-a', version: 1, allowedModels: [defaultModels[0]!.id], allowFallback: false });
+    const stale = await app.inject({ method: 'PUT', url: '/v1/admin/tenants/tenant-a/policy', headers: adminHeaders, payload: { allowedModels: [defaultModels[1]!.id] } });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe('policy_version_conflict');
+    const read = await app.inject({ method: 'GET', url: '/v1/admin/tenants/tenant-a/policy', headers: { authorization: `Bearer ${adminKey}` } });
+    expect(read.json()).toMatchObject({ version: 1, allowedModels: [defaultModels[0]!.id] });
+    const models = await app.inject({ method: 'GET', url: '/v1/models', headers: { authorization: `Bearer ${responseKey}` } });
+    expect(models.json().data.map((model: { id: string }) => model.id)).toEqual([defaultModels[0]!.id]);
+    const allowed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { model: defaultModels[0]!.id, messages: [{ role: 'user', content: 'allowed request' }] } });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.json().route.policyVersion).toContain('tenant-1');
+    const relaxed = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { model: defaultModels[1]!.id, messages: [{ role: 'user', content: 'cannot relax allowlist' }], policy: { allowedModels: [defaultModels[1]!.id] } } });
+    expect(relaxed.statusCode).toBe(422);
+    expect(relaxed.json().error.code).toBe('no_eligible_model');
+    const dataClass = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: `Bearer ${responseKey}` }, payload: { messages: [{ role: 'user', content: 'restricted request' }], policy: { dataClass: 'restricted' } } });
+    expect(dataClass.statusCode).toBe(422);
+    expect(dataClass.json().error.code).toBe('policy_rejection');
+    const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=10', headers: { authorization: `Bearer ${adminKey}` } });
+    expect(audit.json().events).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'policy.set', target: 'tenant:tenant-a', details: { version: 1, reason: 'establish tenant boundary' } })]));
   });
 
   it('returns 409 when a memory limit is below current usage', async () => {

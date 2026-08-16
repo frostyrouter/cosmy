@@ -5,6 +5,7 @@ import type { ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
 import type { ApiScope, RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
 import { requestId } from '../util/ids.js';
+import type { ReloadableTenantPolicyResolver } from '../policy/tenant-policy.js';
 
 function errorBody(error: unknown, requestId?: string): { error: { code: string; message: string; requestId?: string; retryable?: boolean; details?: unknown } } {
   if (error instanceof NoRouteError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable, details: { rejected: error.rejected } } };
@@ -29,12 +30,13 @@ function responseEvent(responseId: string, sequence: number, type: string, paylo
   return { responseId, sequence, type, ...payload };
 }
 
-function tenantRequest(input: ResponseRequest, principal: RequestPrincipal | undefined): ResponseRequest {
+function tenantRequest(input: ResponseRequest, principal: RequestPrincipal | undefined, policies?: ReloadableTenantPolicyResolver): ResponseRequest {
   const tenantId = principal?.tenantId ?? 'anonymous';
   if (input.policy?.tenantId && input.policy.tenantId !== tenantId) {
     throw new RouterError('Request tenant does not match the authenticated credential', 'authorization_error', 403);
   }
-  return { ...input, policy: { ...input.policy, tenantId } };
+  const tenantBound = { ...input, policy: { ...input.policy, tenantId } };
+  return policies?.resolve(tenantBound, tenantId) ?? tenantBound;
 }
 
 function idempotencyKey(value: string | string[] | undefined): string | undefined {
@@ -45,7 +47,7 @@ function idempotencyKey(value: string | string[] | undefined): string | undefine
   return value;
 }
 
-export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator): void {
+export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator, policies?: ReloadableTenantPolicyResolver): void {
   app.setErrorHandler((error: FastifyError, _request, reply) => {
     if (error.validation) {
       return reply.code(400).send({ error: { code: 'invalid_request', message: error.message } });
@@ -65,7 +67,8 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
   app.get('/v1/models', async (request, reply) => {
     try {
       const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
-      return { object: 'list', data: service.listModels(principal?.tenantId ?? 'anonymous') };
+      const tenantId = principal?.tenantId ?? 'anonymous';
+      return { object: 'list', data: service.listModels(tenantId).filter((model) => policies?.allowsModel(tenantId, model) ?? true) };
     } catch (error) {
       const normalized = errorBody(error);
       return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
@@ -78,7 +81,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     reply.raw.on('close', () => controller.abort());
     try {
       const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
-      const input = tenantRequest(submitted, principal);
+      const input = tenantRequest(submitted, principal, policies);
       return { nonBinding: true, decision: await service.simulate(input, controller.signal) };
     } catch (error) {
       const normalized = errorBody(error, submitted.requestId);
@@ -105,7 +108,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     let input: ResponseRequest;
     let requestKey: string | undefined;
     try {
-      input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator));
+      input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator), policies);
       input = input.requestId ? input : { ...input, requestId: requestId() };
       requestKey = idempotencyKey(request.headers['idempotency-key']);
       if (input.stream && requestKey) throw new RouterError('Idempotency-Key is not supported for streaming requests', 'invalid_request', 400);
