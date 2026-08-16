@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DecisionRecord, ModelConfiguration, ResponseResult } from '../domain/types.js';
 import type { BudgetSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
-import type { AuditEvent, ControlPlaneStore, DecisionStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
+import type { AuditEvent, AuditPosition, ControlPlaneStore, DecisionStore, IdempotencyClaim, IdempotencyStore, RegistryRepository, ReservationRepository } from './contracts.js';
 import { RouterError } from '../domain/errors.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
@@ -255,8 +255,10 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  async listAudit(limit: number): Promise<readonly AuditEvent[]> {
-    const result = await this.db.query<AuditRow>('SELECT id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at FROM admin_audit_events ORDER BY occurred_at DESC, id DESC LIMIT $1', [limit]);
+  async listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]> {
+    const result = before
+      ? await this.db.query<AuditRow>('SELECT id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at FROM admin_audit_events WHERE (occurred_at, id) < ($2::timestamptz, $3::uuid) ORDER BY occurred_at DESC, id DESC LIMIT $1', [limit, before.occurredAt, before.id])
+      : await this.db.query<AuditRow>('SELECT id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at FROM admin_audit_events ORDER BY occurred_at DESC, id DESC LIMIT $1', [limit]);
     return result.rows.map(auditEvent);
   }
 

@@ -32,7 +32,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await db.query('DELETE FROM model_manifests');
     await db.query('DELETE FROM model_registry_snapshots');
     await db.query("DELETE FROM usage_reservations WHERE tenant_id = 'control-tenant'");
-    await db.query("DELETE FROM tenant_budgets WHERE tenant_id = 'control-tenant'");
+    await db.query("DELETE FROM tenant_budgets WHERE tenant_id = 'control-tenant' OR tenant_id LIKE 'control-audit-%'");
     await db.query("DELETE FROM api_credentials WHERE credential_id LIKE 'control-%'");
   });
   afterAll(async () => { await db?.close(); });
@@ -125,6 +125,17 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     expect(listed.filter((credential) => credential.scopes.includes('admin:write') && !credential.disabled)).toHaveLength(1);
     const audit = await control.listAudit(10);
     expect(audit).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'credential.create', target: 'credential:control-admin-a' }), expect.objectContaining({ action: 'credential.disable' })]));
+  });
+
+  it('paginates audit events without gaps across equal-time ordering ties', async () => {
+    const actor = { actorCredentialId: 'control-admin', actorTenantId: 'platform' };
+    for (let index = 0; index < 5; index += 1) await control.setBudget({ tenantId: `control-audit-${index}`, limitUsd: index + 1, ...actor });
+    const first = await control.listAudit(2);
+    const second = await control.listAudit(2, { id: first[1]!.id, occurredAt: first[1]!.occurredAt });
+    const third = await control.listAudit(2, { id: second[1]!.id, occurredAt: second[1]!.occurredAt });
+    const ids = [...first, ...second, ...third].filter((event) => event.actorCredentialId === 'control-admin').map((event) => event.id);
+    expect(ids).toHaveLength(5);
+    expect(new Set(ids).size).toBe(5);
   });
 
   it('loads durable credentials at startup and converges on revocation without restart', async () => {

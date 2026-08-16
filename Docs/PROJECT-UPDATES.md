@@ -1,5 +1,12 @@
 # Project updates
 
+## 2026-08-16 - Stable administrative audit pagination (commit pending)
+
+- Change: `GET /v1/admin/audit` now returns a nullable opaque `nextCursor` and accepts that cursor to traverse the complete administrative history beyond the former newest-500 ceiling.
+- Correctness: Memory and PostgreSQL stores use the same descending `(occurredAt, id)` keyset order, avoiding offset drift when new mutations arrive between pages. Cursors are versioned, canonical base64url payloads with strict size, UUID, timestamp, and shape validation.
+- Latency: Pagination is isolated to the administrative control plane and uses the existing PostgreSQL audit index/order; it adds no work to message routing or request authentication.
+- Validation: 179 tests passed locally (20 PostgreSQL integration tests skipped without a database), including cursor round-trip/rejection and HTTP multi-page/no-duplicate behavior; TypeScript lint, production build, and diff whitespace validation passed. Real-PostgreSQL gap-free traversal coverage is included for Compose CI.
+
 ## 2026-08-16 - Durable credential lifecycle (commit pending)
 
 - Change: Added audited PostgreSQL credential creation/listing/revocation, an atomically reloadable in-memory authenticator, immediate local refresh, and bounded cross-instance polling without a database lookup on request authentication.

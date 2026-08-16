@@ -240,6 +240,8 @@ X-Change-Reason: <ticket-or-explanation>
 
 High-impact actions such as credential rotation, provider enablement, policy relaxation, and model promotion may require dual approval.
 
+Administrative audit reads use stable keyset pagination. `GET /v1/admin/audit` returns `events` and a nullable opaque `nextCursor`; pass that value as the next request's `cursor` without decoding or modifying it. Invalid cursors return `400 invalid_request`.
+
 ### Durable API credentials
 
 The implemented credential-management endpoints require `admin:write`:

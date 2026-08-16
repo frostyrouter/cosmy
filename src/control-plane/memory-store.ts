@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ModelConfiguration } from '../domain/types.js';
 import type { BudgetAdministration, BudgetSnapshot, RegistrySnapshot, VersionedModelRegistry } from '../ports/stores.js';
-import type { AuditEvent, ControlPlaneStore } from '../persistence/contracts.js';
+import type { AuditEvent, AuditPosition, ControlPlaneStore } from '../persistence/contracts.js';
 import { nowIso } from '../util/ids.js';
 import type { ModelPromotionEvidence } from './promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
@@ -34,7 +34,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return result;
   }
 
-  async listAudit(limit: number): Promise<readonly AuditEvent[]> { return this.audit.slice(0, limit).map((event) => structuredClone(event)); }
+  async listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]> {
+    return this.audit
+      .filter((event) => !before || event.occurredAt < before.occurredAt || (event.occurredAt === before.occurredAt && event.id < before.id))
+      .sort((left, right) => left.occurredAt === right.occurredAt ? (left.id === right.id ? 0 : left.id > right.id ? -1 : 1) : left.occurredAt > right.occurredAt ? -1 : 1)
+      .slice(0, limit)
+      .map((event) => structuredClone(event));
+  }
 
   async submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence> {
     const { actorCredentialId, actorTenantId, ...submitted } = input;

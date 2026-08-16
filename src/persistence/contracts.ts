@@ -68,11 +68,13 @@ export interface AuditEvent {
   occurredAt: string;
 }
 
+export type AuditPosition = Pick<AuditEvent, 'id' | 'occurredAt'>;
+
 export interface ControlPlaneStore {
   publishModels(input: { models: readonly ModelConfiguration[]; source: string; actorCredentialId: string; actorTenantId: string }): Promise<RegistrySnapshot>;
   budgetFor(tenantId: string): Promise<BudgetSnapshot>;
   setBudget(input: { tenantId: string; limitUsd: number; actorCredentialId: string; actorTenantId: string }): Promise<BudgetSnapshot>;
-  listAudit(limit: number): Promise<readonly AuditEvent[]>;
+  listAudit(limit: number, before?: AuditPosition): Promise<readonly AuditEvent[]>;
   submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence>;
   evidenceFor(modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined>;
   createRollout(input: Omit<ModelRollout, 'id' | 'state' | 'sampleCount' | 'errorCount' | 'totalLatencyMs' | 'reason' | 'createdAt' | 'updatedAt'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelRollout>;

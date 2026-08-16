@@ -72,6 +72,27 @@ describe('administrative HTTP API', () => {
     expect(audit.json().events[0]).toMatchObject({ actorCredentialId: 'admin', action: 'models.publish', details: { modelCount: 1 } });
   });
 
+  it('pages through the complete audit history with an opaque stable cursor', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    for (let index = 0; index < 5; index += 1) {
+      const mutation = await app.inject({ method: 'PUT', url: `/v1/admin/tenants/audit-${index}/budget`, headers, payload: { limitUsd: index + 1 } });
+      expect(mutation.statusCode).toBe(200);
+    }
+    const first = await app.inject({ method: 'GET', url: '/v1/admin/audit?limit=2', headers });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().events).toHaveLength(2);
+    expect(first.json().nextCursor).toEqual(expect.any(String));
+    const second = await app.inject({ method: 'GET', url: `/v1/admin/audit?limit=2&cursor=${first.json().nextCursor}`, headers });
+    const third = await app.inject({ method: 'GET', url: `/v1/admin/audit?limit=2&cursor=${second.json().nextCursor}`, headers });
+    const all = [...first.json().events, ...second.json().events, ...third.json().events];
+    expect(new Set(all.map((event: { id: string }) => event.id)).size).toBe(5);
+    expect(third.json()).toMatchObject({ nextCursor: null });
+    const malformed = await app.inject({ method: 'GET', url: '/v1/admin/audit?cursor=not%2Bbase64', headers });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json().error.code).toBe('invalid_request');
+  });
+
   it('sets a tenant budget that is enforced on the response path', async () => {
     app = await buildApp(config);
     const adminHeaders = { authorization: `Bearer ${adminKey}` };

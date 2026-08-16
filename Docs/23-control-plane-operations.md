@@ -10,7 +10,7 @@ Status: Implemented for model snapshots, tenant budgets, durable credentials, an
 | `PUT /v1/admin/models` | `admin:write` | Validate and atomically publish a complete snapshot |
 | `GET /v1/admin/tenants/:id/budget` | `admin:read` | Read limit, reserved spend, and settled spend |
 | `PUT /v1/admin/tenants/:id/budget` | `admin:write` | Set a hard USD limit without dropping below current usage |
-| `GET /v1/admin/audit?limit=100` | `admin:read` | Read newest administrative mutations, maximum 500 |
+| `GET /v1/admin/audit?limit=100&cursor=...` | `admin:read` | Page through administrative mutations, maximum 500 per page |
 
 `admin:write` implies read access. Ordinary `responses:create` credentials cannot call these routes. Administrative routes always require authentication, even when the response API is allowed to run unauthenticated in development.
 
@@ -62,4 +62,4 @@ PostgreSQL stores the mutation and its audit event in the same transaction. Even
 
 ## Current boundary
 
-This API manages model metadata, tenant spending, and durable hashed credentials. Policy bundles, audit export pagination, rollback shortcuts, and workload identity remain later control-plane work. Rollback today means republishing a previously recorded complete snapshot, producing a new monotonic version and audit event.
+This API manages model metadata, tenant spending, durable hashed credentials, and stable audit-history pagination. Policy bundles, rollback shortcuts, and workload identity remain later control-plane work. Rollback today means republishing a previously recorded complete snapshot, producing a new monotonic version and audit event.

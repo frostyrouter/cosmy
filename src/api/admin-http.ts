@@ -26,7 +26,7 @@ const modelSchema = z.object({
 const publishSchema = z.object({ source: z.string().min(1).max(200), models: z.array(modelSchema).min(1).max(1_000) }).strict();
 const budgetSchema = z.object({ limitUsd: z.number().nonnegative().max(1_000_000_000) }).strict();
 const tenantSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
-const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).strict();
+const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100), cursor: z.string().min(1).max(512).optional() }).strict();
 const evidenceSchema = z.object({
   modelId: z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/u), modelVersion: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/u),
   suiteVersion: z.string().min(1).max(128), datasetVersion: z.string().min(1).max(128),
@@ -119,7 +119,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
     try {
       requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const query = auditQuerySchema.parse(request.query);
-      return { events: await service.listAudit(query.limit) };
+      return await service.listAuditPage(query.limit, query.cursor);
     } catch (error) { return sendError(reply, error); }
   });
 

@@ -7,6 +7,7 @@ import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type 
 import type { InMemoryRolloutRegistry, ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign } from '../shadow/shadow.js';
 import type { ShadowCoordinator } from '../shadow/coordinator.js';
+import { decodeAuditCursor, encodeAuditCursor } from './audit-pagination.js';
 
 export class ControlPlaneService {
   constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator, private readonly credentials?: CredentialStore, private readonly refreshCredentials?: () => Promise<void>) {}
@@ -65,6 +66,13 @@ export class ControlPlaneService {
   }
 
   listAudit(limit: number) { return this.store.listAudit(limit); }
+
+  async listAuditPage(limit: number, cursor?: string) {
+    const rows = await this.store.listAudit(limit + 1, cursor ? decodeAuditCursor(cursor) : undefined);
+    const events = rows.slice(0, limit);
+    const last = events.at(-1);
+    return { events, nextCursor: rows.length > limit && last ? encodeAuditCursor(last) : null };
+  }
 
   submitEvidence(evidence: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'>, actor: RequestPrincipal) {
     return this.store.submitEvidence({ ...evidence, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
