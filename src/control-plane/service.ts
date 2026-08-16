@@ -1,17 +1,38 @@
 import type { ModelConfiguration } from '../domain/types.js';
 import { RouterError } from '../domain/errors.js';
-import type { ControlPlaneStore } from '../persistence/contracts.js';
+import type { ControlPlaneStore, CredentialStore } from '../persistence/contracts.js';
 import type { InMemoryModelRegistry } from '../registry/memory-registry.js';
-import type { RequestPrincipal } from '../security/auth.js';
+import type { ApiScope, RequestPrincipal } from '../security/auth.js';
 import { assessPromotion, hasModelVersionConflict, needsPromotionEvidence, type ModelPromotionEvidence } from './promotion.js';
 import type { InMemoryRolloutRegistry, ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign } from '../shadow/shadow.js';
 import type { ShadowCoordinator } from '../shadow/coordinator.js';
 
 export class ControlPlaneService {
-  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator) {}
+  constructor(private readonly store: ControlPlaneStore, private readonly registry: InMemoryModelRegistry, private readonly availableProviders: ReadonlySet<string>, private readonly rollouts?: InMemoryRolloutRegistry, private readonly shadows?: ShadowCoordinator, private readonly credentials?: CredentialStore, private readonly refreshCredentials?: () => Promise<void>) {}
 
   snapshot() { return this.registry.currentSnapshot(); }
+
+  async listCredentials() {
+    if (!this.credentials) throw new RouterError('Durable credential management requires PostgreSQL mode', 'credential_store_unavailable', 503, true);
+    return (await this.credentials.listCredentials()).map(({ keySha256: _keySha256, ...credential }) => credential);
+  }
+
+  async createCredential(input: { id: string; tenantId: string; keySha256: string; scopes: readonly ApiScope[] }, actor: RequestPrincipal) {
+    if (!this.credentials) throw new RouterError('Durable credential management requires PostgreSQL mode', 'credential_store_unavailable', 503, true);
+    const created = await this.credentials.createCredential({ ...input, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    await this.refreshCredentials?.();
+    const { keySha256: _keySha256, ...metadata } = created;
+    return metadata;
+  }
+
+  async disableCredential(id: string, actor: RequestPrincipal) {
+    if (!this.credentials) throw new RouterError('Durable credential management requires PostgreSQL mode', 'credential_store_unavailable', 503, true);
+    const disabled = await this.credentials.disableCredential({ id, actorCredentialId: actor.credentialId, actorTenantId: actor.tenantId });
+    await this.refreshCredentials?.();
+    const { keySha256: _keySha256, ...metadata } = disabled;
+    return metadata;
+  }
 
   async publishModels(models: readonly ModelConfiguration[], source: string, actor: RequestPrincipal) {
     if (models.length === 0) throw new RouterError('A registry snapshot must contain at least one model', 'invalid_request', 400, false);

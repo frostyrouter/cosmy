@@ -21,7 +21,7 @@ describe('classifier configuration', () => {
 describe('programmatic configuration', () => {
   it('applies safe defaults to partial app configuration without inheriting ambient test credentials', () => {
     const resolved = resolveConfig({ environment: 'test', port: 0 }, { OPENAI_API_KEY: 'must-not-affect-config-defaults' });
-    expect(resolved).toMatchObject({ environment: 'test', port: 0, requestTimeoutMs: 60_000, providerMaxRetries: 2, persistenceMode: 'memory', cacheMode: 'off', healthRefreshSeconds: 2 });
+    expect(resolved).toMatchObject({ environment: 'test', port: 0, requestTimeoutMs: 60_000, providerMaxRetries: 2, persistenceMode: 'memory', cacheMode: 'off', healthRefreshSeconds: 2, credentialRefreshSeconds: 2 });
     expect(resolved.apiCredentials).toBeUndefined();
   });
 
@@ -31,5 +31,6 @@ describe('programmatic configuration', () => {
     expect(() => resolveConfig({ classifierTimeoutMs: 0 }, {})).toThrow('positive classifier timeout');
     expect(() => resolveConfig({ registryRefreshSeconds: -1 }, {})).toThrow('non-negative registry refresh interval');
     expect(() => resolveConfig({ healthRefreshSeconds: -1 }, {})).toThrow('non-negative health refresh interval');
+    expect(() => resolveConfig({ credentialRefreshSeconds: -1 }, {})).toThrow('non-negative credential refresh interval');
   });
 });

@@ -5,6 +5,7 @@ import { defaultModels } from '../src/registry/default-models.js';
 import { buildApp } from '../src/app.js';
 import { sha256ApiKey } from '../src/security/auth.js';
 import { newDecisionRecord } from './support/decision-fixture.js';
+import { PostgresCredentialStore } from '../src/persistence/postgres-credentials.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -32,6 +33,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await db.query('DELETE FROM model_registry_snapshots');
     await db.query("DELETE FROM usage_reservations WHERE tenant_id = 'control-tenant'");
     await db.query("DELETE FROM tenant_budgets WHERE tenant_id = 'control-tenant'");
+    await db.query("DELETE FROM api_credentials WHERE credential_id LIKE 'control-%'");
   });
   afterAll(async () => { await db?.close(); });
 
@@ -105,6 +107,38 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     await expect(control.setBudget({ tenantId: 'control-tenant', limitUsd: 0.01, actorCredentialId: 'control-admin', actorTenantId: 'platform' })).rejects.toMatchObject({ code: 'budget_below_usage', statusCode: 409 });
     await reservations.reconcile(reservation, 0);
     await expect(control.listAudit(10)).resolves.toEqual([]);
+  });
+
+  it('creates, lists, and disables hashed credentials with last-admin protection', async () => {
+    const credentials = new PostgresCredentialStore(db);
+    const actor = { actorCredentialId: 'control-admin', actorTenantId: 'platform' };
+    const first = await credentials.createCredential({ id: 'control-admin-a', tenantId: 'platform', keySha256: sha256ApiKey('control-admin-a-secret'), scopes: ['admin:write'], ...actor });
+    await expect(credentials.createCredential({ id: 'control-admin-a', tenantId: 'platform', keySha256: sha256ApiKey('control-admin-a-secret'), scopes: ['admin:write'], ...actor })).resolves.toEqual(first);
+    await credentials.createCredential({ id: 'control-admin-b', tenantId: 'platform', keySha256: sha256ApiKey('control-admin-b-secret'), scopes: ['admin:write'], ...actor });
+    expect(first.keySha256).toBe(sha256ApiKey('control-admin-a-secret'));
+    const concurrent = await Promise.allSettled([credentials.disableCredential({ id: 'control-admin-a', ...actor }), credentials.disableCredential({ id: 'control-admin-b', ...actor })]);
+    expect(concurrent.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(concurrent.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const disabledId = concurrent[0]!.status === 'fulfilled' ? 'control-admin-a' : 'control-admin-b';
+    await expect(credentials.disableCredential({ id: disabledId, ...actor })).resolves.toMatchObject({ id: disabledId, disabled: true });
+    const listed = await credentials.listCredentials();
+    expect(listed.filter((credential) => credential.scopes.includes('admin:write') && !credential.disabled)).toHaveLength(1);
+    const audit = await control.listAudit(10);
+    expect(audit).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'credential.create', target: 'credential:control-admin-a' }), expect.objectContaining({ action: 'credential.disable' })]));
+  });
+
+  it('loads durable credentials at startup and converges on revocation without restart', async () => {
+    const credentials = new PostgresCredentialStore(db);
+    const actor = { actorCredentialId: 'control-admin', actorTenantId: 'platform' };
+    await credentials.createCredential({ id: 'control-live-caller', tenantId: 'control-tenant', keySha256: sha256ApiKey('control-live-secret'), scopes: ['responses:create'], ...actor });
+    const app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', persistenceMode: 'postgres', databaseUrl: databaseUrl!, classifierMode: 'disabled', credentialRefreshSeconds: 1 });
+    try {
+      const request = () => app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer control-live-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+      expect((await request()).statusCode).toBe(200);
+      await credentials.disableCredential({ id: 'control-live-caller', ...actor });
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      expect((await request()).statusCode).toBe(401);
+    } finally { await app.close(); }
   });
 
   it('persists decisions without exposing them across tenants', async () => {

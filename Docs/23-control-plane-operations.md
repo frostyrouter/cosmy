@@ -1,6 +1,6 @@
 # Control-plane operations
 
-Status: Implemented for model snapshots, tenant budgets, and audit reads.
+Status: Implemented for model snapshots, tenant budgets, durable credentials, and audit reads.
 
 ## What operators can change
 
@@ -62,4 +62,4 @@ PostgreSQL stores the mutation and its audit event in the same transaction. Even
 
 ## Current boundary
 
-This API manages model metadata and tenant spending. Credential lifecycle, policy bundles, audit export pagination, rollback shortcuts, and workload identity remain later control-plane work. Rollback today means republishing a previously recorded complete snapshot, producing a new monotonic version and audit event.
+This API manages model metadata, tenant spending, and durable hashed credentials. Policy bundles, audit export pagination, rollback shortcuts, and workload identity remain later control-plane work. Rollback today means republishing a previously recorded complete snapshot, producing a new monotonic version and audit event.

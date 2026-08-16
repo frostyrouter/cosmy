@@ -3,6 +3,18 @@ import type { BudgetSnapshot, ModelHealthSnapshot, RegistrySnapshot, UsageReserv
 import type { ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
 import type { ShadowCampaign, ShadowObservation, ShadowReservation } from '../shadow/shadow.js';
+import type { ApiCredential, ApiScope } from '../security/auth.js';
+
+export interface ManagedApiCredential extends ApiCredential {
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CredentialStore {
+  listCredentials(): Promise<readonly ManagedApiCredential[]>;
+  createCredential(input: { id: string; tenantId: string; keySha256: string; scopes: readonly ApiScope[]; actorCredentialId: string; actorTenantId: string }): Promise<ManagedApiCredential>;
+  disableCredential(input: { id: string; actorCredentialId: string; actorTenantId: string }): Promise<ManagedApiCredential>;
+}
 
 export interface RegistryRepository {
   getCurrent(): Promise<RegistrySnapshot | undefined>;
@@ -50,7 +62,7 @@ export interface AuditEvent {
   id: string;
   actorCredentialId: string;
   actorTenantId: string;
-  action: 'models.publish' | 'budget.set' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
+  action: 'models.publish' | 'budget.set' | 'credential.create' | 'credential.disable' | 'model_evidence.submit' | 'rollout.start' | 'rollout.promote' | 'rollout.rollback' | 'rollout.auto_rollback' | 'shadow.start' | 'shadow.pause' | 'shadow.resume' | 'shadow.complete';
   target: string;
   details: Record<string, unknown>;
   occurredAt: string;

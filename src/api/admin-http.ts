@@ -47,6 +47,13 @@ const shadowCampaignSchema = z.object({
   allowedDataClasses: z.array(z.enum(['public', 'internal'])).min(1).max(2),
 }).strict();
 const shadowActionSchema = z.object({ id: rolloutIdSchema, action: z.enum(['pause', 'resume', 'complete']) }).strict();
+const credentialIdSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/u);
+const credentialSchema = z.object({
+  id: credentialIdSchema,
+  tenantId: tenantSchema,
+  keySha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  scopes: z.array(z.enum(['responses:create', 'routing:read', 'admin:read', 'admin:write', 'metrics:read'])).min(1).max(5),
+}).strict().refine((value) => new Set(value.scopes).size === value.scopes.length, { message: 'Credential scopes must be unique', path: ['scopes'] });
 
 function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): RequestPrincipal {
   const principal = authenticator?.authenticate(authorization);
@@ -63,6 +70,24 @@ function sendError(reply: FastifyReply, error: unknown) {
 }
 
 export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneService, authenticator?: RequestAuthenticator): void {
+  app.get('/v1/admin/credentials', async (request, reply) => {
+    try { requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return { credentials: await service.listCredentials() }; } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post('/v1/admin/credentials', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      return reply.code(201).send(await service.createCredential(credentialSchema.parse(request.body), actor));
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.post<{ Params: { id: string } }>('/v1/admin/credentials/:id/disable', async (request, reply) => {
+    try {
+      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      return await service.disableCredential(credentialIdSchema.parse(request.params.id), actor);
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.get('/v1/admin/models', async (request, reply) => {
     try { requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return service.snapshot(); } catch (error) { return sendError(reply, error); }
   });

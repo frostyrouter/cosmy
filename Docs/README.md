@@ -40,6 +40,7 @@ The documentation deliberately separates product intent from implementation deta
 - [End-to-end deadlines](32-end-to-end-deadlines.md)
 - [Shared provider health](33-shared-provider-health.md)
 - [Complete decision evidence](34-complete-decision-evidence.md)
+- [Durable credential lifecycle](35-durable-credential-lifecycle.md)
 
 ## Decision status vocabulary
 

@@ -1,6 +1,6 @@
 # Tenant security quick guide
 
-Status: implemented foundation.
+Status: implemented for static bootstrap and durable PostgreSQL credential rotation/revocation.
 
 ## What is guaranteed
 
@@ -31,7 +31,7 @@ Status: implemented foundation.
 ]
 ```
 
-The client sends `Authorization: Bearer <plaintext-key>`. Disable a key by adding `"disabled": true` and restarting the current static configuration. The legacy `COSMY_API_KEY` variable remains available for migration and maps to tenant `default`; new deployments should not use it.
+The client sends `Authorization: Bearer <plaintext-key>`. Static bootstrap credentials still require configuration restart, but PostgreSQL-backed credentials can be created and disabled through the audited admin API without restarting routers. Only SHA-256 digests cross the admin boundary or enter PostgreSQL; operators must generate high-entropy plaintext keys outside Cosmy and deliver them through an approved secret channel. The legacy `COSMY_API_KEY` variable remains available for migration and maps to tenant `default`; new deployments should not use it.
 
 ## Safe rollout
 
@@ -48,4 +48,4 @@ Do not add admin scopes to ordinary application credentials. `admin:write` can p
 
 ## Next security milestone
 
-Static credentials are the safe bootstrap path, not the final identity plane. Planned work adds durable hashed project keys, rotation without restart, OAuth/workload identity, and immediate revocation. Administrative mutations are already scope-controlled and durably audited.
+Static credentials are the bootstrap path. Durable hashed project keys, rotation without restart, and bounded cross-instance revocation are implemented in PostgreSQL mode; see [durable credential lifecycle](35-durable-credential-lifecycle.md). OAuth/workload identity remains future work.

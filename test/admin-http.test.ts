@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { defaultModels } from '../src/registry/default-models.js';
-import { sha256ApiKey } from '../src/security/auth.js';
+import { ReloadableApiKeyAuthenticator, sha256ApiKey } from '../src/security/auth.js';
+import type { CredentialStore, ManagedApiCredential } from '../src/persistence/contracts.js';
 import { InMemoryUsageLedger } from '../src/stores/memory-usage-ledger.js';
 
 const adminKey = 'admin-secret';
@@ -28,6 +29,37 @@ describe('administrative HTTP API', () => {
     const diagnostics = await app.inject({ method: 'GET', url: '/v1/admin/diagnostics', headers: { authorization: `Bearer ${adminKey}` } });
     expect(diagnostics.statusCode).toBe(200);
     expect(diagnostics.json()).toMatchObject({ status: 'ready', persistence: 'memory', registry: { modelCount: 3, enabledModelCount: 3 } });
+  });
+
+  it('creates and disables a redacted credential without restarting', async () => {
+    const stored: ManagedApiCredential[] = [];
+    const credentialStore: CredentialStore = {
+      listCredentials: async () => structuredClone(stored),
+      createCredential: async (input) => {
+        const now = new Date().toISOString();
+        const created = { id: input.id, tenantId: input.tenantId, keySha256: input.keySha256, scopes: [...input.scopes], createdAt: now, updatedAt: now };
+        stored.push(created); return structuredClone(created);
+      },
+      disableCredential: async (input) => {
+        const found = stored.find((entry) => entry.id === input.id)!; found.disabled = true; found.updatedAt = new Date().toISOString(); return structuredClone(found);
+      },
+    };
+    const authenticator = new ReloadableApiKeyAuthenticator(credentials);
+    app = await buildApp(config, { authenticator, credentials: credentialStore });
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const created = await app.inject({ method: 'POST', url: '/v1/admin/credentials', headers, payload: { id: 'rotated-caller', tenantId: 'tenant-b', keySha256: sha256ApiKey('rotated-secret'), scopes: ['responses:create'] } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ id: 'rotated-caller', tenantId: 'tenant-b', scopes: ['responses:create'] });
+    expect(created.body).not.toContain(sha256ApiKey('rotated-secret'));
+    const accepted = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer rotated-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(accepted.statusCode).toBe(200);
+    const listed = await app.inject({ method: 'GET', url: '/v1/admin/credentials', headers });
+    expect(listed.body).not.toContain(sha256ApiKey('rotated-secret'));
+    const disabled = await app.inject({ method: 'POST', url: '/v1/admin/credentials/rotated-caller/disable', headers });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json()).toMatchObject({ id: 'rotated-caller', disabled: true });
+    const rejected = await app.inject({ method: 'POST', url: '/v1/responses', headers: { authorization: 'Bearer rotated-secret' }, payload: { messages: [{ role: 'user', content: 'hello' }] } });
+    expect(rejected.statusCode).toBe(401);
   });
 
   it('publishes validated model snapshots and records an audit event', async () => {

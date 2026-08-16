@@ -1,5 +1,14 @@
 # Project updates
 
+## 2026-08-16 - Durable credential lifecycle (commit pending)
+
+- Change: Added audited PostgreSQL credential creation/listing/revocation, an atomically reloadable in-memory authenticator, immediate local refresh, and bounded cross-instance polling without a database lookup on request authentication.
+- Security: The API accepts and stores only SHA-256 digests, redacts digests from admin responses, validates scopes/identifiers in both API and SQL, and serializes admin revocation so concurrent requests cannot disable every durable `admin:write` key.
+- Reliability: Exact create and disable retries are idempotent; refresh failures preserve the prior known-good snapshot and increment `credential_refresh_failure`, while refresh generations prevent a slow stale query from overwriting a newer snapshot. Static bootstrap keys remain configuration-owned and require a final restart to remove.
+- Operations: Apply migration 012, set `CREDENTIAL_REFRESH_SECONDS` (default 2), create two durable admins before removing bootstrap configuration, and generate/distribute high-entropy plaintext keys outside Cosmy.
+- Validation: 176 tests passed locally (19 PostgreSQL integration tests skipped without a database), including reload/rotation/revocation/admin redaction/config/migration coverage; TypeScript lint, production build, and diff whitespace validation passed. Real PostgreSQL concurrency, idempotency, and cross-instance revocation tests are included for Compose CI.
+- Remaining boundary: Cross-instance revocation is polling-bounded rather than push-immediate; OAuth/workload identity remains future work.
+
 ## 2026-08-12 - Complete routing decision evidence (commit pending)
 
 - Change: Added route-less durable records for semantic/routing rejections and ordered, privacy-safe candidate attempt history for completion, failure, cancellation, validation fallback, and streaming fallback.

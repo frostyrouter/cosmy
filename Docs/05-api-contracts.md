@@ -240,6 +240,18 @@ X-Change-Reason: <ticket-or-explanation>
 
 High-impact actions such as credential rotation, provider enablement, policy relaxation, and model promotion may require dual approval.
 
+### Durable API credentials
+
+The implemented credential-management endpoints require `admin:write`:
+
+```http
+GET /v1/admin/credentials
+POST /v1/admin/credentials
+POST /v1/admin/credentials/{credential_id}/disable
+```
+
+Creation accepts a caller-generated SHA-256 key digest, tenant ID, credential ID, and scopes. Cosmy never accepts, returns, or persists the plaintext key, and list/create/disable responses omit the digest. Exact create and disable retries are idempotent. At least one enabled durable `admin:write` credential is protected under concurrent revocations. See [durable credential lifecycle](35-durable-credential-lifecycle.md) for rollout and revocation timing.
+
 ## Compatibility policy
 
 Compatibility endpoints document:
