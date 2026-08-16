@@ -48,7 +48,7 @@ ALTER TABLE admin_audit_events ADD CONSTRAINT admin_audit_events_event_hash_chec
 CREATE OR REPLACE FUNCTION append_admin_audit_event(
   event_id UUID, actor_credential TEXT, actor_tenant TEXT, event_action TEXT,
   event_target TEXT, event_details JSONB
-) RETURNS VOID LANGUAGE plpgsql AS $$
+) RETURNS VOID LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 DECLARE
   sequence_value BIGINT;
   prior_hash TEXT;

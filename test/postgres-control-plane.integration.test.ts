@@ -6,6 +6,7 @@ import { buildApp } from '../src/app.js';
 import { sha256ApiKey } from '../src/security/auth.js';
 import { newDecisionRecord } from './support/decision-fixture.js';
 import { PostgresCredentialStore } from '../src/persistence/postgres-credentials.js';
+import { readFile } from 'node:fs/promises';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -61,6 +62,28 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
   it('serializes concurrent audit appends into one gap-free chain', async () => {
     await Promise.all(Array.from({ length: 10 }, (_, index) => control.setBudget({ tenantId: `control-audit-chain-${index}`, limitUsd: index + 1, actorCredentialId: 'control-admin', actorTenantId: 'platform' })));
     await expect(control.verifyAudit()).resolves.toMatchObject({ valid: true, checkedEvents: 10, headSequence: 10, headHash: expect.stringMatching(/^[0-9a-f]{64}$/u) });
+  });
+
+  it('backfills a valid chain over legacy audit rows during migration 016', async () => {
+    const migration = await readFile('migrations/016_tamper_evident_audit.sql', 'utf8');
+    await db.query('DROP SCHEMA IF EXISTS audit_backfill_test CASCADE');
+    try {
+      await db.transaction(async (tx) => {
+        await tx.query('CREATE SCHEMA audit_backfill_test');
+        await tx.query('SET LOCAL search_path TO audit_backfill_test, public');
+        await tx.query("CREATE TABLE admin_audit_events (id UUID PRIMARY KEY, actor_credential_id TEXT NOT NULL, actor_tenant_id TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, details JSONB NOT NULL DEFAULT '{}'::jsonb, occurred_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+        await tx.query("INSERT INTO admin_audit_events (id, actor_credential_id, actor_tenant_id, action, target, details, occurred_at) VALUES ('00000000-0000-4000-8000-000000000001', 'legacy-a', 'platform', 'budget.set', 'tenant:a', '{\"limitUsd\":1}', '2026-01-01T00:00:00Z'), ('00000000-0000-4000-8000-000000000002', 'legacy-b', 'platform', 'budget.set', 'tenant:b', '{\"limitUsd\":2}', '2026-01-02T00:00:00Z')");
+        await tx.query(migration);
+        const rows = await tx.query<{ chain_sequence: string | number; previous_hash: string; event_hash: string }>('SELECT chain_sequence, previous_hash, event_hash FROM admin_audit_events ORDER BY chain_sequence');
+        expect(rows.rows).toHaveLength(2);
+        expect(Number(rows.rows[0]!.chain_sequence)).toBe(1);
+        expect(rows.rows[0]!.previous_hash).toBe('0'.repeat(64));
+        expect(rows.rows[0]!.event_hash).toMatch(/^[0-9a-f]{64}$/u);
+        expect(Number(rows.rows[1]!.chain_sequence)).toBe(2);
+        expect(rows.rows[1]!.previous_hash).toBe(rows.rows[0]!.event_hash);
+        expect(rows.rows[1]!.event_hash).toMatch(/^[0-9a-f]{64}$/u);
+      });
+    } finally { await db.query('DROP SCHEMA IF EXISTS audit_backfill_test CASCADE'); }
   });
 
   it('serializes registry rollback and copies a prior snapshot with its audit event', async () => {
