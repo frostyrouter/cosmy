@@ -296,6 +296,32 @@ describe('HTTP API', () => {
     expect(records.at(-1)).toMatchObject({ state: 'failed', errorCode: 'timeout' });
   });
 
+  it('returns 503 immediately when provider concurrency is saturated', async () => {
+    let release!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const provider: ProviderAdapter = {
+      name: 'simulator', listModels: () => defaultModels,
+      complete: async () => {
+        markStarted();
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { output: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, estimatedCostUsd: 0 }, finishReason: 'stop' };
+      },
+      stream: async function* () {},
+    };
+    const metrics = new InMemoryMetrics();
+    app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 5_000, providerMaxRetries: 0, providerMaxConcurrency: 1 }, { providers: [provider], metrics });
+    const request = { method: 'POST' as const, url: '/v1/responses', payload: { model: defaultModels[0]!.id, messages: [{ role: 'user', content: 'hello' }] } };
+    const first = app.inject(request);
+    await started;
+    const saturated = await app.inject(request);
+    expect(saturated.statusCode).toBe(503);
+    expect(saturated.json().error).toMatchObject({ code: 'provider_saturated', retryable: true });
+    expect(metrics.snapshot().operational.provider_saturated).toBe(1);
+    release();
+    expect((await first).statusCode).toBe(200);
+  });
+
   it('includes classifier time in the overall request deadline', async () => {
     app = await buildApp({ host: '127.0.0.1', port: 0, logLevel: 'silent', environment: 'test', requestTimeoutMs: 30, classifierTimeoutMs: 5_000, classifierMode: 'fail', providerMaxRetries: 0 }, {
       classifier: { name: 'slow', classify: async () => new Promise(() => {}) },

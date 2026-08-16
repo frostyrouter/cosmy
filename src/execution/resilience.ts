@@ -1,5 +1,6 @@
 import type { ModelConfiguration, ResponseChunk } from '../domain/types.js';
-import { ProviderError, RequestCancelledError } from '../domain/errors.js';
+import { ProviderError, ProviderSaturatedError, RequestCancelledError } from '../domain/errors.js';
+import type { MetricsSink } from '../observability/metrics.js';
 import type { ProviderAdapter, ProviderRequest, ProviderResponse } from '../ports/provider.js';
 
 export interface ResilienceOptions {
@@ -13,14 +14,23 @@ export interface ResilienceOptions {
 class CircuitBreaker {
   private failures = 0;
   private openedAt = 0;
+  private probeInFlight = false;
   constructor(private readonly threshold: number, private readonly cooldownMs: number) {}
 
   before(): void {
     if (this.openedAt > 0 && Date.now() - this.openedAt < this.cooldownMs) throw new ProviderError('Provider circuit is open', true);
-    if (this.openedAt > 0) { this.openedAt = 0; this.failures = 0; }
+    if (this.openedAt > 0) {
+      if (this.probeInFlight) throw new ProviderError('Provider circuit is half-open', true);
+      this.probeInFlight = true;
+    }
   }
-  success(): void { this.failures = 0; this.openedAt = 0; }
-  failure(): void { this.failures += 1; if (this.failures >= this.threshold) this.openedAt = Date.now(); }
+  success(): void { this.failures = 0; this.openedAt = 0; this.probeInFlight = false; }
+  failure(): void {
+    this.failures += 1;
+    if (this.probeInFlight || this.failures >= this.threshold) this.openedAt = Date.now();
+    this.probeInFlight = false;
+  }
+  cancelled(): void { this.probeInFlight = false; }
 }
 
 function retryable(error: unknown): boolean { return error instanceof ProviderError ? error.retryable : true; }
@@ -65,8 +75,9 @@ export class ResilientProvider implements ProviderAdapter {
       } catch (error) {
         current.cancel();
         lastError = error;
-        if (input.signal.aborted) throw new RequestCancelledError();
+        if (input.signal.aborted) { this.breaker.cancelled(); throw new RequestCancelledError(); }
         if (retryable(error)) this.breaker.failure();
+        else this.breaker.success();
         if (!retryable(error) || attempt === this.options.maxRetries) throw error;
         await wait(this.options.baseDelayMs ?? 100 * (2 ** attempt), input.signal);
       }
@@ -92,8 +103,9 @@ export class ResilientProvider implements ProviderAdapter {
       } catch (error) {
         current.cancel();
         lastError = error;
-        if (input.signal.aborted) throw new RequestCancelledError();
+        if (input.signal.aborted) { this.breaker.cancelled(); throw new RequestCancelledError(); }
         if (retryable(error)) this.breaker.failure();
+        else this.breaker.success();
         if (emitted || !retryable(error) || attempt === this.options.maxRetries) throw error;
         await wait(this.options.baseDelayMs ?? 100 * (2 ** attempt), input.signal);
       }
@@ -102,6 +114,35 @@ export class ResilientProvider implements ProviderAdapter {
   }
 }
 
+export class BulkheadProvider implements ProviderAdapter {
+  private active = 0;
+  constructor(private readonly inner: ProviderAdapter, private readonly maximumConcurrency: number, private readonly metrics?: MetricsSink) {
+    if (!Number.isInteger(maximumConcurrency) || maximumConcurrency <= 0) throw new Error('Provider maximum concurrency must be a positive integer');
+  }
+  get name(): string { return this.inner.name; }
+  listModels(): readonly ModelConfiguration[] { return this.inner.listModels(); }
+  async complete(input: ProviderRequest): Promise<ProviderResponse> {
+    this.acquire();
+    try { return await this.inner.complete(input); } finally { this.release(); }
+  }
+  async *stream(input: ProviderRequest): AsyncIterable<ResponseChunk> {
+    this.acquire();
+    try { for await (const chunk of this.inner.stream(input)) yield chunk; } finally { this.release(); }
+  }
+  private acquire(): void {
+    if (this.active >= this.maximumConcurrency) {
+      this.metrics?.increment?.('provider_saturated');
+      throw new ProviderSaturatedError();
+    }
+    this.active += 1;
+  }
+  private release(): void { this.active = Math.max(0, this.active - 1); }
+}
+
 export function resilientProviders(providers: readonly ProviderAdapter[], options: ResilienceOptions): ProviderAdapter[] {
   return providers.map((provider) => new ResilientProvider(provider, options));
+}
+
+export function bulkheadProviders(providers: readonly ProviderAdapter[], maximumConcurrency: number, metrics?: MetricsSink): ProviderAdapter[] {
+  return providers.map((provider) => new BulkheadProvider(provider, maximumConcurrency, metrics));
 }

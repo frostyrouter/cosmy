@@ -1,5 +1,13 @@
 # Project updates
 
+## 2026-08-17 - Provider bulkheads and bounded circuit recovery (commit pending)
+
+- Change: Added a zero-queue concurrency bulkhead around every provider and limited half-open circuit recovery to one probe, preventing slow/outage traffic from creating unbounded in-process work or a recovery stampede.
+- Runtime impact: Each provider receives an independent positive `PROVIDER_MAX_CONCURRENCY` cap (default 100). Saturated calls fail immediately with retryable `provider_saturated`, increment the same-named operational metric, and remain eligible for an already planned policy-compliant fallback. Permits cover retries and are released on every completion, error, cancellation, and early stream close.
+- Files: Provider resilience/error contracts, application/config/environment wiring, metrics, focused concurrency/stream/circuit/config tests, and reliability/operator documentation.
+- Validation: 198 tests passed locally (23 PostgreSQL integration tests skipped without a database), including HTTP 503/metric behavior, permit release, early stream termination, and half-open concurrency; TypeScript lint, production build, and diff whitespace validation passed. The 20,000-request benchmark completed with zero errors at about 643 requests/second and 126.933 ms p95 on this development host; deployment load testing remains the sizing authority. Compose CI is pending publication.
+- Boundary: Limits are per process rather than distributed; deployment-wide capacity is replicas multiplied by the provider cap. Priority/fairness queues and automatic cap tuning remain outside this milestone.
+
 ## 2026-08-17 - Cached OIDC workload identity (commit pending)
 
 - Change: Added signed JWT workload authentication behind the existing bearer-token API, composing it with bootstrap and durable API keys while mapping verified issuer subjects, tenants, and prefixed scopes into the existing principal contract.

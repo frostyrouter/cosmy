@@ -8,7 +8,7 @@ import { InMemoryHealthStore } from './stores/memory-health-store.js';
 import { configuredClassifier, configuredModelManifests, configuredProviders } from './providers/configured.js';
 import { DeterministicRouter } from './routing/router.js';
 import { RequestExecutor } from './execution/executor.js';
-import { resilientProviders } from './execution/resilience.js';
+import { bulkheadProviders, resilientProviders } from './execution/resilience.js';
 import { RouterService } from './service/router-service.js';
 import { registerRoutes } from './api/http.js';
 import { registerAdminRoutes } from './api/admin-http.js';
@@ -170,8 +170,8 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   }
   health ??= new InMemoryHealthStore();
   registerMetricsRoute(app, metrics, authenticator);
-  const providers = resilientProviders(configuredProviders(runtimeEnv, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
-  const providerAdapters = dependencies.providers ?? providers;
+  const providers = dependencies.providers ?? resilientProviders(configuredProviders(runtimeEnv, registry.snapshot()), { maxRetries: config.providerMaxRetries, timeoutMs: config.requestTimeoutMs });
+  const providerAdapters = bulkheadProviders(providers, config.providerMaxConcurrency, metrics);
   const rolloutRegistry = new InMemoryRolloutRegistry();
   const controlStore: ControlPlaneStore | undefined = registry instanceof InMemoryModelRegistry && (postgres || isBudgetAdministration(usage))
     ? postgres ? new PostgresControlPlaneStore(postgres, rolloutPostgres, shadowPostgres) : new InMemoryControlPlaneStore(registry, usage as UsageLedger & BudgetAdministration)
