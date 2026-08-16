@@ -18,11 +18,11 @@ All APIs use explicit versions. Experimental fields are namespaced and disabled 
 Supported modes:
 
 - Project API key
-- OAuth 2.0 access token
-- Workload identity federation
-- Mutual TLS for private deployments
+- Signed OIDC/OAuth 2.0 JWT access token with an explicitly configured issuer, audience, JWKS URI, and claim mapping
+- Mutual TLS for private deployments (design target; not implemented)
 
 Credentials identify tenant, project, environment, principal, and scopes. Provider credentials are never accepted in ordinary request bodies.
+API keys and OIDC tokens share the same `Authorization: Bearer` entry point. See [cached OIDC workload identity](39-oidc-workload-identity.md) for the accepted JWT profile and rotation behavior.
 
 ## Create response
 

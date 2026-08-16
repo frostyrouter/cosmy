@@ -72,4 +72,4 @@ PostgreSQL stores the mutation and its audit event in the same transaction. Even
 
 ## Current boundary
 
-This API manages model metadata, atomic registry rollback, emergency model disable, tenant policy and spending controls, durable hashed credentials, and stable audit-history pagination. Workload identity remains later control-plane work.
+This API manages model metadata, atomic registry rollback, emergency model disable, tenant policy and spending controls, durable hashed credentials, and stable audit-history pagination. OIDC workloads may receive administrative scopes only through a tightly controlled identity-provider claim mapping; interactive authorization flows, token issuance, introspection, and mTLS identity remain outside Cosmy.

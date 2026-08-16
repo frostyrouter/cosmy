@@ -1,5 +1,14 @@
 # Project updates
 
+## 2026-08-17 - Cached OIDC workload identity (commit pending)
+
+- Change: Added signed JWT workload authentication behind the existing bearer-token API, composing it with bootstrap and durable API keys while mapping verified issuer subjects, tenants, and prefixed scopes into the existing principal contract.
+- Security/reliability: Verification pins the issuer, audience, asymmetric algorithms, required lifetime claims, optional token type, and a trusted HTTPS JWKS endpoint. Startup fails if keys cannot be bootstrapped; refresh is single-flight and preserves known-good keys only for a configured bounded stale window before failing closed. Unknown key IDs fail immediately and start a background refresh.
+- Latency/operations: Known-key requests verify against an in-memory JWKS without an identity-provider or database round trip. Added configuration, `oidc_jwks_refresh_failure`, a rotation/outage runbook, and `npm run bench:oidc`. Identity operators must overlap signing keys and should issue short-lived access tokens.
+- Files: Authentication contracts and HTTP callers, cached OIDC verifier, application/config wiring, metrics, environment example, unit/HTTP/config regressions, benchmark, and security/API/operator documentation.
+- Validation: 194 tests passed locally (23 PostgreSQL integration tests skipped without a database); TypeScript lint, production build, dependency-tree validation, diff whitespace validation, and a production dependency audit with zero known vulnerabilities passed. The isolated 10,000-verification benchmark completed with zero failures, one JWKS fetch, about 29,806 verifications/second, and 3.254 ms p95. The existing 20,000-request benchmark completed with zero errors at about 630 requests/second and 127.638 ms p95 on this development host; deployment load testing remains the release authority.
+- Boundary: Cosmy accepts signed JWT bearer tokens only; authorization-code flows, token issuance/refresh, opaque-token introspection, per-token revocation, DPoP/mTLS binding, and dynamic issuer discovery remain outside this milestone.
+
 ## 2026-08-16 - Durable tenant policy bundles (commit pending)
 
 - Change: Added versioned PostgreSQL/in-memory tenant policies with admin read/replace endpoints, provider/model allow/deny controls, region/data-class boundaries, cost/latency/quality limits, and fallback control.

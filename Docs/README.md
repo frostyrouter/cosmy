@@ -44,6 +44,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Atomic registry rollback](36-atomic-registry-rollback.md)
 - [Emergency model disable](37-emergency-model-disable.md)
 - [Durable tenant policy bundles](38-durable-tenant-policy-bundles.md)
+- [Cached OIDC workload identity](39-oidc-workload-identity.md)
 
 ## Decision status vocabulary
 

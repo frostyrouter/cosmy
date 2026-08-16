@@ -18,9 +18,9 @@ function writeSse(reply: FastifyReply, event: string, data: unknown): void {
   reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope = 'responses:create'): RequestPrincipal | undefined {
+async function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope = 'responses:create'): Promise<RequestPrincipal | undefined> {
   if (!authenticator) return undefined;
-  const principal = authenticator.authenticate(authorization);
+  const principal = await authenticator.authenticate(authorization);
   if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401);
   if (!principal.scopes.includes(scope)) throw new RouterError(`Credential lacks required scope '${scope}'`, 'authorization_error', 403);
   return principal;
@@ -66,7 +66,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
 
   app.get('/v1/models', async (request, reply) => {
     try {
-      const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
       const tenantId = principal?.tenantId ?? 'anonymous';
       return { object: 'list', data: service.listModels(tenantId).filter((model) => policies?.allowsModel(tenantId, model) ?? true) };
     } catch (error) {
@@ -80,7 +80,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     const controller = new AbortController();
     reply.raw.on('close', () => controller.abort());
     try {
-      const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
       const input = tenantRequest(submitted, principal, policies);
       return { nonBinding: true, decision: await service.simulate(input, controller.signal) };
     } catch (error) {
@@ -91,7 +91,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
 
   app.get('/v1/routing/decisions/:decisionId', async (request, reply) => {
     try {
-      const principal = authorize(request.headers.authorization, authenticator, 'routing:read');
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
       const decisionId = (request.params as { decisionId?: string }).decisionId;
       if (!decisionId || !/^[A-Za-z0-9._:-]{1,128}$/u.test(decisionId)) throw new RouterError('Decision ID is invalid', 'invalid_request', 400);
       const decision = await service.decision(principal?.tenantId ?? 'anonymous', decisionId);
@@ -108,7 +108,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     let input: ResponseRequest;
     let requestKey: string | undefined;
     try {
-      input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator), policies);
+      input = tenantRequest(submitted, await authorize(request.headers.authorization, authenticator), policies);
       input = input.requestId ? input : { ...input, requestId: requestId() };
       requestKey = idempotencyKey(request.headers['idempotency-key']);
       if (input.stream && requestKey) throw new RouterError('Idempotency-Key is not supported for streaming requests', 'invalid_request', 400);

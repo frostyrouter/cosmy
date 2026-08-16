@@ -64,8 +64,8 @@ const credentialSchema = z.object({
   scopes: z.array(z.enum(['responses:create', 'routing:read', 'admin:read', 'admin:write', 'metrics:read'])).min(1).max(5),
 }).strict().refine((value) => new Set(value.scopes).size === value.scopes.length, { message: 'Credential scopes must be unique', path: ['scopes'] });
 
-function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): RequestPrincipal {
-  const principal = authenticator?.authenticate(authorization);
+async function requirePrincipal(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: ApiScope): Promise<RequestPrincipal> {
+  const principal = await authenticator?.authenticate(authorization);
   if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401, false);
   const authorized = principal.scopes.includes(scope) || (scope === 'admin:read' && principal.scopes.includes('admin:write'));
   if (!authorized) throw new RouterError(`Credential requires '${scope}' scope`, 'authorization_error', 403, false);
@@ -103,30 +103,30 @@ function requiredChangeReason(value: string | string[] | undefined): string {
 
 export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneService, authenticator?: RequestAuthenticator): void {
   app.get('/v1/admin/credentials', async (request, reply) => {
-    try { requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return { credentials: await service.listCredentials() }; } catch (error) { return sendError(reply, error); }
+    try { await requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return { credentials: await service.listCredentials() }; } catch (error) { return sendError(reply, error); }
   });
 
   app.post('/v1/admin/credentials', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return reply.code(201).send(await service.createCredential(credentialSchema.parse(request.body), actor));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.post<{ Params: { id: string } }>('/v1/admin/credentials/:id/disable', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return await service.disableCredential(credentialIdSchema.parse(request.params.id), actor);
     } catch (error) { return sendError(reply, error); }
   });
 
   app.get('/v1/admin/models', async (request, reply) => {
-    try { requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return service.snapshot(); } catch (error) { return sendError(reply, error); }
+    try { await requirePrincipal(request.headers.authorization, authenticator, 'admin:read'); return service.snapshot(); } catch (error) { return sendError(reply, error); }
   });
 
   app.put('/v1/admin/models', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = publishSchema.parse(request.body);
       return await service.publishModels(input.models as readonly ModelConfiguration[], input.source, actor);
     } catch (error) { return sendError(reply, error); }
@@ -134,7 +134,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/models/rollback', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = rollbackSchema.parse(request.body);
       return await service.rollbackModels(input.targetVersion, requiredRegistryVersion(request.headers['if-match']), input.reason, actor);
     } catch (error) { return sendError(reply, error); }
@@ -142,7 +142,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/models/disable', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = disableModelSchema.parse(request.body);
       return await service.disableModel(input.modelId, requiredRegistryVersion(request.headers['if-match']), input.reason, actor);
     } catch (error) { return sendError(reply, error); }
@@ -150,7 +150,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.get<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/policy', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const policy = await service.tenantPolicy(tenantSchema.parse(request.params.tenantId));
       if (!policy) return reply.code(404).send({ error: { code: 'not_found', message: 'Tenant policy was not found' } });
       return policy;
@@ -159,7 +159,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.put<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/policy', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const parsed = tenantPolicySchema.parse(request.body);
       const constraints = Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined)) as TenantPolicyConstraints;
       return await service.setTenantPolicy(tenantSchema.parse(request.params.tenantId), requiredPolicyVersion(request.headers['if-match']), requiredChangeReason(request.headers['x-change-reason']), constraints, actor);
@@ -168,14 +168,14 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.get<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/budget', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       return await service.budgetFor(tenantSchema.parse(request.params.tenantId));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.put<{ Params: { tenantId: string } }>('/v1/admin/tenants/:tenantId/budget', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = budgetSchema.parse(request.body);
       return await service.setBudget(tenantSchema.parse(request.params.tenantId), input.limitUsd, actor);
     } catch (error) { return sendError(reply, error); }
@@ -183,7 +183,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.get('/v1/admin/audit', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const query = auditQuerySchema.parse(request.query);
       return await service.listAuditPage(query.limit, query.cursor);
     } catch (error) { return sendError(reply, error); }
@@ -191,14 +191,14 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/model-evidence', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return reply.code(201).send(await service.submitEvidence(evidenceSchema.parse(request.body), actor));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.get('/v1/admin/model-evidence', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const query = evidenceSchema.pick({ modelId: true, modelVersion: true }).parse(request.query);
       const { modelId, modelVersion } = query;
       const evidence = await service.evidenceFor(modelId, modelVersion);
@@ -209,21 +209,21 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/model-promotion-assessments', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       return await service.assessCandidate(modelSchema.parse(request.body) as ModelConfiguration);
     } catch (error) { return sendError(reply, error); }
   });
 
   app.post('/v1/admin/model-rollouts', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return reply.code(201).send(await service.createRollout(rolloutSchema.parse(request.body), actor));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.get<{ Params: { id: string } }>('/v1/admin/model-rollouts/:id', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const rollout = await service.rollout(rolloutIdSchema.parse(request.params.id));
       if (!rollout) return reply.code(404).send({ error: { code: 'not_found', message: 'Model rollout was not found' } });
       return rollout;
@@ -232,7 +232,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/model-rollout-actions', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       const input = rolloutActionSchema.parse(request.body);
       return await service.changeRollout(input.id, input.action, input.reason, actor);
     } catch (error) { return sendError(reply, error); }
@@ -240,14 +240,14 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/shadow-campaigns', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');
       return reply.code(201).send(await service.createShadowCampaign(shadowCampaignSchema.parse(request.body), actor));
     } catch (error) { return sendError(reply, error); }
   });
 
   app.get<{ Params: { id: string } }>('/v1/admin/shadow-campaigns/:id', async (request, reply) => {
     try {
-      requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
       const campaign = await service.shadowCampaign(rolloutIdSchema.parse(request.params.id));
       if (!campaign) return reply.code(404).send({ error: { code: 'not_found', message: 'Shadow campaign was not found' } });
       return campaign;
@@ -256,7 +256,7 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
 
   app.post('/v1/admin/shadow-campaign-actions', async (request, reply) => {
     try {
-      const actor = requirePrincipal(request.headers.authorization, authenticator, 'admin:write'); const input = shadowActionSchema.parse(request.body);
+      const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write'); const input = shadowActionSchema.parse(request.body);
       return await service.changeShadowCampaign(input.id, input.action, actor);
     } catch (error) { return sendError(reply, error); }
   });

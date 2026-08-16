@@ -25,6 +25,13 @@ describe('programmatic configuration', () => {
     expect(resolved.apiCredentials).toBeUndefined();
   });
 
+  it('requires complete OIDC configuration and pins safe algorithm defaults', () => {
+    expect(() => loadConfig({ OIDC_ISSUER: 'https://identity.example.com' })).toThrow('configured together');
+    const oidc = loadConfig({ OIDC_ISSUER: 'https://identity.example.com', OIDC_AUDIENCE: 'cosmy', OIDC_JWKS_URI: 'https://identity.example.com/jwks' });
+    expect(oidc).toMatchObject({ oidcAlgorithms: ['RS256'], oidcTenantClaim: 'tenant_id', oidcScopeClaim: 'scope', oidcScopePrefix: 'cosmy:', oidcMaximumTokenAgeSeconds: 3_600, oidcJwksRefreshSeconds: 300 });
+    expect(() => loadConfig({ OIDC_ISSUER: 'https://identity.example.com', OIDC_AUDIENCE: 'cosmy', OIDC_JWKS_URI: 'https://identity.example.com/jwks', OIDC_ALGORITHMS: 'none' })).toThrow('non-empty allowlist');
+  });
+
   it('rejects unsafe programmatic timeout and retry values', () => {
     expect(() => resolveConfig({ requestTimeoutMs: 0 }, {})).toThrow('positive request timeout');
     expect(() => resolveConfig({ providerMaxRetries: -1 }, {})).toThrow('non-negative provider retries');
@@ -33,5 +40,6 @@ describe('programmatic configuration', () => {
     expect(() => resolveConfig({ healthRefreshSeconds: -1 }, {})).toThrow('non-negative health refresh interval');
     expect(() => resolveConfig({ credentialRefreshSeconds: -1 }, {})).toThrow('non-negative credential refresh interval');
     expect(() => resolveConfig({ policyRefreshSeconds: -1 }, {})).toThrow('non-negative policy refresh interval');
+    expect(() => resolveConfig({ oidcClockToleranceSeconds: -1 }, {})).toThrow('non-negative OIDC clock tolerance');
   });
 });

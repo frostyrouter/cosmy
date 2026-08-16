@@ -17,7 +17,19 @@ export interface RequestPrincipal {
 }
 
 export interface RequestAuthenticator {
-  authenticate(authorization: string | undefined): RequestPrincipal | undefined;
+  authenticate(authorization: string | undefined): RequestPrincipal | undefined | Promise<RequestPrincipal | undefined>;
+}
+
+export class CompositeRequestAuthenticator implements RequestAuthenticator {
+  constructor(private readonly authenticators: readonly RequestAuthenticator[]) {}
+
+  async authenticate(authorization: string | undefined): Promise<RequestPrincipal | undefined> {
+    for (const authenticator of this.authenticators) {
+      const principal = await authenticator.authenticate(authorization);
+      if (principal) return principal;
+    }
+    return undefined;
+  }
 }
 
 export function sha256ApiKey(apiKey: string): string {

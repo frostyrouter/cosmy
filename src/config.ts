@@ -23,6 +23,19 @@ export interface AppConfig {
   healthRefreshSeconds?: number;
   credentialRefreshSeconds?: number;
   policyRefreshSeconds?: number;
+  oidcIssuer?: string;
+  oidcAudience?: string;
+  oidcJwksUri?: string;
+  oidcAlgorithms?: readonly string[];
+  oidcTenantClaim?: string;
+  oidcScopeClaim?: string;
+  oidcScopePrefix?: string;
+  oidcTokenType?: string;
+  oidcMaximumTokenAgeSeconds?: number;
+  oidcClockToleranceSeconds?: number;
+  oidcJwksRefreshSeconds?: number;
+  oidcMaximumJwksStaleSeconds?: number;
+  oidcRequestTimeoutMs?: number;
   classifierMode?: 'disabled' | 'degrade' | 'fail';
   classifierTimeoutMs?: number;
 }
@@ -67,6 +80,14 @@ function validateConfig(config: AppConfig): AppConfig {
   if (config.healthRefreshSeconds !== undefined && (!Number.isInteger(config.healthRefreshSeconds) || config.healthRefreshSeconds < 0)) throw new Error(`Expected a non-negative health refresh interval, received '${config.healthRefreshSeconds}'`);
   if (config.credentialRefreshSeconds !== undefined && (!Number.isInteger(config.credentialRefreshSeconds) || config.credentialRefreshSeconds < 0)) throw new Error(`Expected a non-negative credential refresh interval, received '${config.credentialRefreshSeconds}'`);
   if (config.policyRefreshSeconds !== undefined && (!Number.isInteger(config.policyRefreshSeconds) || config.policyRefreshSeconds < 0)) throw new Error(`Expected a non-negative policy refresh interval, received '${config.policyRefreshSeconds}'`);
+  const oidcValues = [config.oidcIssuer, config.oidcAudience, config.oidcJwksUri];
+  if (oidcValues.some((value) => value !== undefined) && oidcValues.some((value) => !value)) throw new Error('OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URI must be configured together');
+  if (config.oidcAlgorithms !== undefined && (config.oidcAlgorithms.length === 0 || config.oidcAlgorithms.some((algorithm) => !['RS256', 'PS256', 'ES256', 'EdDSA'].includes(algorithm)))) throw new Error('OIDC algorithms must be a non-empty allowlist of RS256, PS256, ES256, or EdDSA');
+  if (config.oidcMaximumTokenAgeSeconds !== undefined && (!Number.isInteger(config.oidcMaximumTokenAgeSeconds) || config.oidcMaximumTokenAgeSeconds <= 0)) throw new Error('Expected a positive OIDC maximum token age');
+  if (config.oidcClockToleranceSeconds !== undefined && (!Number.isInteger(config.oidcClockToleranceSeconds) || config.oidcClockToleranceSeconds < 0)) throw new Error('Expected a non-negative OIDC clock tolerance');
+  if (config.oidcJwksRefreshSeconds !== undefined && (!Number.isInteger(config.oidcJwksRefreshSeconds) || config.oidcJwksRefreshSeconds < 0)) throw new Error('Expected a non-negative OIDC JWKS refresh interval');
+  if (config.oidcMaximumJwksStaleSeconds !== undefined && (!Number.isInteger(config.oidcMaximumJwksStaleSeconds) || config.oidcMaximumJwksStaleSeconds <= 0)) throw new Error('Expected a positive OIDC maximum JWKS stale interval');
+  if (config.oidcRequestTimeoutMs !== undefined && (!Number.isInteger(config.oidcRequestTimeoutMs) || config.oidcRequestTimeoutMs <= 0)) throw new Error('Expected a positive OIDC request timeout');
   if (config.classifierTimeoutMs !== undefined && (!Number.isFinite(config.classifierTimeoutMs) || config.classifierTimeoutMs <= 0)) throw new Error(`Expected a positive classifier timeout, received '${config.classifierTimeoutMs}'`);
   return config;
 }
@@ -132,6 +153,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     healthRefreshSeconds: nonNegativeIntegerEnv(env.HEALTH_REFRESH_SECONDS, 2),
     credentialRefreshSeconds: nonNegativeIntegerEnv(env.CREDENTIAL_REFRESH_SECONDS, 2),
     policyRefreshSeconds: nonNegativeIntegerEnv(env.POLICY_REFRESH_SECONDS, 2),
+    ...(env.OIDC_ISSUER ? { oidcIssuer: env.OIDC_ISSUER } : {}),
+    ...(env.OIDC_AUDIENCE ? { oidcAudience: env.OIDC_AUDIENCE } : {}),
+    ...(env.OIDC_JWKS_URI ? { oidcJwksUri: env.OIDC_JWKS_URI } : {}),
+    oidcAlgorithms: (env.OIDC_ALGORITHMS ?? 'RS256').split(',').map((value) => value.trim()).filter(Boolean),
+    oidcTenantClaim: env.OIDC_TENANT_CLAIM ?? 'tenant_id',
+    oidcScopeClaim: env.OIDC_SCOPE_CLAIM ?? 'scope',
+    oidcScopePrefix: env.OIDC_SCOPE_PREFIX ?? 'cosmy:',
+    ...(env.OIDC_TOKEN_TYPE ? { oidcTokenType: env.OIDC_TOKEN_TYPE } : {}),
+    oidcMaximumTokenAgeSeconds: positiveIntegerEnv(env.OIDC_MAX_TOKEN_AGE_SECONDS, 3_600),
+    oidcClockToleranceSeconds: nonNegativeIntegerEnv(env.OIDC_CLOCK_TOLERANCE_SECONDS, 5),
+    oidcJwksRefreshSeconds: nonNegativeIntegerEnv(env.OIDC_JWKS_REFRESH_SECONDS, 300),
+    oidcMaximumJwksStaleSeconds: positiveIntegerEnv(env.OIDC_MAX_JWKS_STALE_SECONDS, 86_400),
+    oidcRequestTimeoutMs: positiveIntegerEnv(env.OIDC_REQUEST_TIMEOUT_MS, 2_000),
     classifierMode,
     classifierTimeoutMs: numberEnv(env.CLASSIFIER_TIMEOUT_MS, 3_000),
   });

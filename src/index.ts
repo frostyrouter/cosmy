@@ -5,6 +5,7 @@ export * from './routing/features.js';
 export * from './routing/vector.js';
 export * from './routing/policy.js';
 export * from './policy/tenant-policy.js';
+export * from './security/oidc-auth.js';
 export * from './routing/router.js';
 export * from './registry/default-models.js';
 export * from './registry/memory-registry.js';

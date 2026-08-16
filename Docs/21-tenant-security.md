@@ -1,12 +1,13 @@
 # Tenant security quick guide
 
-Status: implemented for static bootstrap and durable PostgreSQL credential rotation/revocation.
+Status: implemented for static bootstrap keys, durable PostgreSQL credential rotation/revocation, and cached OIDC JWT workload identity.
 
 ## What is guaranteed
 
 | Boundary | Behavior |
 |---|---|
 | API keys | Runtime configuration stores SHA-256 digests, not plaintext tenant keys. |
+| OIDC tokens | Exact issuer/audience, pinned asymmetric algorithms, signature, subject, expiry, issued-at time, tenant claim, and optional token type are verified locally against a bounded cached JWKS. |
 | Tenant identity | `/v1/responses` derives the billing tenant from the authenticated credential. |
 | Caller overrides | A different `policy.tenantId` is rejected with HTTP 403. |
 | Authorization | Response callers need `responses:create`; operators use separate `admin:read` or `admin:write` credentials. |
@@ -46,6 +47,6 @@ The client sends `Authorization: Bearer <plaintext-key>`. Static bootstrap crede
 
 Do not add admin scopes to ordinary application credentials. `admin:write` can publish the full model registry and change tenant limits; it implies `admin:read`. Duplicate enabled key digests fail startup so one bearer key can never resolve to two tenant identities. See [Control-plane operations](23-control-plane-operations.md).
 
-## Next security milestone
+## Workload identity
 
-Static credentials are the bootstrap path. Durable hashed project keys, rotation without restart, and bounded cross-instance revocation are implemented in PostgreSQL mode; see [durable credential lifecycle](35-durable-credential-lifecycle.md). OAuth/workload identity remains future work.
+Static credentials remain the bootstrap path. Durable hashed project keys and bounded cross-instance revocation are described in [durable credential lifecycle](35-durable-credential-lifecycle.md). For short-lived service identity, configure the OIDC issuer, audience, and JWKS URI together and map only provider-managed claims. Key retrieval happens at startup and in the background, never on the known-key request path. See [cached OIDC workload identity](39-oidc-workload-identity.md).

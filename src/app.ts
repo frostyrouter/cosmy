@@ -26,7 +26,8 @@ import { PostgresCredentialStore } from './persistence/postgres-credentials.js';
 import { InMemoryResponseCache } from './persistence/memory-cache.js';
 import { InMemoryIdempotencyStore } from './persistence/memory-idempotency.js';
 import { InMemoryDecisionStore } from './persistence/memory-decisions.js';
-import { ReloadableApiKeyAuthenticator, sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
+import { CompositeRequestAuthenticator, ReloadableApiKeyAuthenticator, sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
+import { CachedOidcAuthenticator, type OidcFetcher } from './security/oidc-auth.js';
 import { InMemoryControlPlaneStore } from './control-plane/memory-store.js';
 import { ControlPlaneService } from './control-plane/service.js';
 import { InMemoryRolloutRegistry, type RolloutOutcome } from './rollouts/rollout.js';
@@ -46,6 +47,7 @@ export interface AppDependencies {
   decisions?: import('./persistence/contracts.js').DecisionStore;
   credentials?: import('./persistence/contracts.js').CredentialStore;
   classifier?: RequestClassifier | null;
+  oidcFetcher?: OidcFetcher;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -58,6 +60,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   const classifierMode = config.classifierMode ?? (config.environment === 'production' ? 'fail' : availableClassifier ? 'degrade' : 'disabled');
   const classifier = classifierMode === 'disabled' ? undefined : availableClassifier;
   const app = Fastify({ logger: { level: config.logLevel }, ajv: { customOptions: { removeAdditional: false } } });
+  const metrics = dependencies.metrics ?? new InMemoryMetrics();
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
     try { done(null, JSON.parse(String(body))); } catch { done(Object.assign(new Error('Invalid JSON body'), { statusCode: 400 })); }
   });
@@ -70,6 +73,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   let credentialStore: CredentialStore | undefined = dependencies.credentials;
   let refreshCredentials: (() => Promise<void>) | undefined;
   let credentialRefreshGeneration = 0;
+  let oidcAuthenticator: CachedOidcAuthenticator | undefined;
   let postgres: PostgresSqlClient | undefined;
   let rolloutPostgres: PostgresSqlClient | undefined;
   let shadowPostgres: PostgresSqlClient | undefined;
@@ -118,6 +122,17 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     };
     await refreshCredentials();
   }
+  if (config.oidcIssuer && config.oidcAudience && config.oidcJwksUri) {
+    oidcAuthenticator = new CachedOidcAuthenticator({
+      issuer: config.oidcIssuer, audience: config.oidcAudience, jwksUri: config.oidcJwksUri, algorithms: config.oidcAlgorithms ?? ['RS256'],
+      tenantClaim: config.oidcTenantClaim ?? 'tenant_id', scopeClaim: config.oidcScopeClaim ?? 'scope', scopePrefix: config.oidcScopePrefix ?? 'cosmy:',
+      maximumTokenAgeSeconds: config.oidcMaximumTokenAgeSeconds ?? 3_600, clockToleranceSeconds: config.oidcClockToleranceSeconds ?? 5,
+      maximumJwksStaleSeconds: config.oidcMaximumJwksStaleSeconds ?? 86_400, requestTimeoutMs: config.oidcRequestTimeoutMs ?? 2_000,
+      ...(config.oidcTokenType ? { tokenType: config.oidcTokenType } : {}),
+    }, dependencies.oidcFetcher, () => metrics.increment?.('oidc_jwks_refresh_failure'));
+    try { await oidcAuthenticator.refresh(); } catch (error) { await app.close(); throw new Error('OIDC JWKS bootstrap failed', { cause: error }); }
+    authenticator = authenticator ? new CompositeRequestAuthenticator([authenticator, oidcAuthenticator]) : oidcAuthenticator;
+  }
   if (config.environment === 'production' && !config.allowUnauthenticated && !authenticator) {
     await app.close();
     throw new Error('Production requires an enabled durable or bootstrap API credential, or explicit ALLOW_UNAUTHENTICATED=true');
@@ -147,7 +162,6 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   if (!cache && config.cacheMode === 'memory') {
     cache = new InMemoryResponseCache();
   }
-  const metrics = dependencies.metrics ?? new InMemoryMetrics();
   let health = dependencies.health;
   if (!health && healthPostgres) {
     sharedHealth = new PostgresHealthStore(healthPostgres, () => metrics.increment?.('health_store_failure'));
@@ -258,6 +272,17 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
       const refresh = refreshPolicies;
       const timer = setInterval(() => {
         void refresh().catch((error: unknown) => { metrics.increment?.('policy_refresh_failure'); app.log.error({ err: error }, 'tenant policy refresh failed'); });
+      }, refreshSeconds * 1_000);
+      timer.unref();
+      app.addHook('onClose', async () => { clearInterval(timer); });
+    }
+  }
+  if (oidcAuthenticator) {
+    const refreshSeconds = config.oidcJwksRefreshSeconds ?? 300;
+    if (refreshSeconds > 0) {
+      const oidc = oidcAuthenticator;
+      const timer = setInterval(() => {
+        void oidc.refresh().catch((error: unknown) => { metrics.increment?.('oidc_jwks_refresh_failure'); app.log.error({ err: error }, 'OIDC JWKS refresh failed'); });
       }, refreshSeconds * 1_000);
       timer.unref();
       app.addHook('onClose', async () => { clearInterval(timer); });
