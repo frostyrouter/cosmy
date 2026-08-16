@@ -8,6 +8,7 @@
 - Operations: Apply migration 012, set `CREDENTIAL_REFRESH_SECONDS` (default 2), create two durable admins before removing bootstrap configuration, and generate/distribute high-entropy plaintext keys outside Cosmy.
 - Validation: 176 tests passed locally (19 PostgreSQL integration tests skipped without a database), including reload/rotation/revocation/admin redaction/config/migration coverage; TypeScript lint, production build, and diff whitespace validation passed. Real PostgreSQL concurrency, idempotency, and cross-instance revocation tests are included for Compose CI.
 - Remaining boundary: Cross-instance revocation is polling-bounded rather than push-immediate; OAuth/workload identity remains future work.
+- CI correction: The first Compose run showed that migration 012 created credential audit events without extending PostgreSQL's existing audit-action constraint. Migration 012 now replaces the constraint with the complete action set, and migration coverage asserts both credential actions are present.
 
 ## 2026-08-12 - Complete routing decision evidence (commit pending)
 

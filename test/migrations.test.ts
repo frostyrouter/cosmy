@@ -27,6 +27,7 @@ describe('managed database migrations', () => {
     expect(queries.some((query) => query.includes("state IN ('planned', 'completed', 'failed', 'cancelled', 'rejected')"))).toBe(true);
     expect(queries.some((query) => query.includes("ADD COLUMN IF NOT EXISTS attempts JSONB"))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS api_credentials'))).toBe(true);
+    expect(queries.some((query) => query.includes("'credential.create', 'credential.disable'"))).toBe(true);
     expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(12);
   });
 });
