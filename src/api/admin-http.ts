@@ -189,6 +189,14 @@ export function registerAdminRoutes(app: FastifyInstance, service: ControlPlaneS
     } catch (error) { return sendError(reply, error); }
   });
 
+  app.get('/v1/admin/audit/verify', async (request, reply) => {
+    try {
+      await requirePrincipal(request.headers.authorization, authenticator, 'admin:read');
+      const verification = await service.verifyAudit();
+      return reply.code(verification.valid ? 200 : 409).send(verification);
+    } catch (error) { return sendError(reply, error); }
+  });
+
   app.post('/v1/admin/model-evidence', async (request, reply) => {
     try {
       const actor = await requirePrincipal(request.headers.authorization, authenticator, 'admin:write');

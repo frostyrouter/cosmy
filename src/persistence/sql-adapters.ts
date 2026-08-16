@@ -348,6 +348,30 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
     return result.rows.map(auditEvent);
   }
 
+  async verifyAudit() {
+    const result = await this.db.query<{ valid: boolean; checked_events: string | number; head_sequence: string | number | null; head_hash: string | null }>(`
+      WITH calculated AS (
+        SELECT chain_sequence, event_hash,
+          row_number() OVER (ORDER BY chain_sequence) AS ordinal,
+          COALESCE(lag(event_hash) OVER (ORDER BY chain_sequence), repeat('0', 64)) AS expected_previous_hash,
+          previous_hash,
+          encode(digest(convert_to(jsonb_build_object(
+            'v', 1, 'sequence', chain_sequence, 'previousHash', previous_hash,
+            'id', id::text, 'actorCredentialId', actor_credential_id,
+            'actorTenantId', actor_tenant_id, 'action', action,
+            'target', target, 'details', details,
+            'occurredAt', to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+          )::text, 'UTF8'), 'sha256'), 'hex') AS calculated_hash
+        FROM admin_audit_events
+      )
+      SELECT COALESCE(bool_and(chain_sequence = ordinal AND previous_hash = expected_previous_hash AND event_hash = calculated_hash), true) AS valid,
+        count(*) AS checked_events, max(chain_sequence) AS head_sequence,
+        (array_agg(event_hash ORDER BY chain_sequence DESC))[1] AS head_hash
+      FROM calculated`);
+    const row = result.rows[0]!;
+    return { valid: row.valid, checkedEvents: Number(row.checked_events), headSequence: row.head_sequence === null ? null : Number(row.head_sequence), headHash: row.head_hash };
+  }
+
   async submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence> {
     if (!this.db.transaction) throw new Error('PostgresControlPlaneStore requires transactional SQL client');
     return this.db.transaction(async (tx) => {
@@ -497,7 +521,7 @@ export class PostgresControlPlaneStore implements ControlPlaneStore {
   }
 
   private async appendAudit(db: SqlClient, actorCredentialId: string, actorTenantId: string, action: AuditEvent['action'], target: string, details: Record<string, unknown>): Promise<void> {
-    await db.query('INSERT INTO admin_audit_events (id, actor_credential_id, actor_tenant_id, action, target, details) VALUES ($1, $2, $3, $4, $5, $6)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
+    await db.query('SELECT append_admin_audit_event($1, $2, $3, $4, $5, $6::jsonb)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
   }
 
   private async evidenceForWith(db: SqlClient, modelId: string, modelVersion: string): Promise<ModelPromotionEvidence | undefined> {

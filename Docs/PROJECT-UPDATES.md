@@ -1,5 +1,14 @@
 # Project updates
 
+## 2026-08-17 - Tamper-evident administrative audit chain (commit pending)
+
+- Change: Added migration 016 to backfill and enforce a globally ordered SHA-256 predecessor chain across every PostgreSQL administrative audit event, plus authenticated `GET /v1/admin/audit/verify` integrity checks.
+- Atomicity/concurrency: All control-plane and credential audit writers now call one advisory-lock-serialized database function inside their existing mutation transaction, preventing concurrent chain forks while preserving mutation/audit all-or-nothing behavior.
+- Operations/security: Full verification detects content changes, gaps, insertion, reordering, and broken predecessor links and returns HTTP 409. The endpoint reports a head hash suitable for separately administered signed/WORM checkpoints; the database chain alone cannot defeat a superuser who recomputes the full history.
+- Files: PostgreSQL migration/function, audit store contract and implementations, admin service/route, corruption/migration/HTTP tests, and security/operator documentation.
+- Validation: 199 tests passed locally (25 PostgreSQL integration tests skipped without a database), plus TypeScript lint, production build, and diff whitespace validation. Real migration, concurrent append, and corruption detection require Compose CI before publication.
+- Migration: `pgcrypto` is required. Existing audit rows are updated in one migration transaction, so production operators must test runtime and WAL/storage impact on a representative copy and schedule an appropriate maintenance window.
+
 ## 2026-08-17 - Provider bulkheads and bounded circuit recovery (commit pending)
 
 - Change: Added a zero-queue concurrency bulkhead around every provider and limited half-open circuit recovery to one probe, preventing slow/outage traffic from creating unbounded in-process work or a recovery stampede.

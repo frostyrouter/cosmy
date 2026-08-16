@@ -32,6 +32,8 @@ describe('managed database migrations', () => {
     expect(queries.some((query) => query.includes("'models.rollback', 'models.disable'"))).toBe(true);
     expect(queries.some((query) => query.includes('CREATE TABLE IF NOT EXISTS tenant_policies'))).toBe(true);
     expect(queries.some((query) => query.includes("'budget.set', 'policy.set'"))).toBe(true);
-    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(15);
+    expect(queries.some((query) => query.includes('CREATE OR REPLACE FUNCTION append_admin_audit_event'))).toBe(true);
+    expect(queries.some((query) => query.includes('admin_audit_events_chain_sequence'))).toBe(true);
+    expect(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations'))).toHaveLength(16);
   });
 });

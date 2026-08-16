@@ -48,6 +48,21 @@ describe.skipIf(!databaseUrl)('PostgreSQL administrative control plane', () => {
     ]));
   });
 
+  it('detects audit content tampering and verifies a restored chain', async () => {
+    await control.setBudget({ tenantId: 'control-audit-integrity', limitUsd: 10, actorCredentialId: 'control-admin', actorTenantId: 'platform' });
+    await expect(control.verifyAudit()).resolves.toMatchObject({ valid: true, checkedEvents: 1, headSequence: 1, headHash: expect.stringMatching(/^[0-9a-f]{64}$/u) });
+    const event = (await db.query<{ id: string; details: Record<string, unknown> }>("SELECT id, details FROM admin_audit_events WHERE actor_credential_id = 'control-admin' ORDER BY chain_sequence DESC LIMIT 1")).rows[0]!;
+    await db.query("UPDATE admin_audit_events SET details = '{\"limitUsd\":999}'::jsonb WHERE id = $1", [event.id]);
+    await expect(control.verifyAudit()).resolves.toMatchObject({ valid: false, checkedEvents: 1 });
+    await db.query('UPDATE admin_audit_events SET details = $2::jsonb WHERE id = $1', [event.id, JSON.stringify(event.details)]);
+    await expect(control.verifyAudit()).resolves.toMatchObject({ valid: true });
+  });
+
+  it('serializes concurrent audit appends into one gap-free chain', async () => {
+    await Promise.all(Array.from({ length: 10 }, (_, index) => control.setBudget({ tenantId: `control-audit-chain-${index}`, limitUsd: index + 1, actorCredentialId: 'control-admin', actorTenantId: 'platform' })));
+    await expect(control.verifyAudit()).resolves.toMatchObject({ valid: true, checkedEvents: 10, headSequence: 10, headHash: expect.stringMatching(/^[0-9a-f]{64}$/u) });
+  });
+
   it('serializes registry rollback and copies a prior snapshot with its audit event', async () => {
     const actor = { actorCredentialId: 'control-admin', actorTenantId: 'platform' };
     await control.submitEvidence({ modelId: defaultModels[0]!.id, modelVersion: defaultModels[0]!.version, suiteVersion: 'suite-1', datasetVersion: 'dataset-1', conformancePassed: true, pricingVerified: true, usageVerified: true, routingPassRate: 0.99, qualityScore: 0.9, sampleCount: 200, evaluatedAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(), ...actor });

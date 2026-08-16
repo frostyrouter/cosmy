@@ -73,5 +73,5 @@ function credential(row: CredentialRow): ManagedApiCredential {
 }
 
 function audit(db: SqlClient, actorCredentialId: string, actorTenantId: string, action: 'credential.create' | 'credential.disable', target: string, details: Record<string, unknown>): Promise<unknown> {
-  return db.query('INSERT INTO admin_audit_events (id, actor_credential_id, actor_tenant_id, action, target, details) VALUES ($1, $2, $3, $4, $5, $6)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
+  return db.query('SELECT append_admin_audit_event($1, $2, $3, $4, $5, $6::jsonb)', [randomUUID(), actorCredentialId, actorTenantId, action, target, JSON.stringify(details)]);
 }

@@ -140,6 +140,14 @@ describe('administrative HTTP API', () => {
     expect(malformed.json().error.code).toBe('invalid_request');
   });
 
+  it('reports the administrative audit-chain verification state', async () => {
+    app = await buildApp(config);
+    const headers = { authorization: `Bearer ${adminKey}` };
+    const verification = await app.inject({ method: 'GET', url: '/v1/admin/audit/verify', headers });
+    expect(verification.statusCode).toBe(200);
+    expect(verification.json()).toMatchObject({ valid: true, checkedEvents: 0, headSequence: null, headHash: null });
+  });
+
   it('sets a tenant budget that is enforced on the response path', async () => {
     app = await buildApp(config);
     const adminHeaders = { authorization: `Bearer ${adminKey}` };

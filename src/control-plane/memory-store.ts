@@ -98,6 +98,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       .map((event) => structuredClone(event));
   }
 
+  async verifyAudit() {
+    return { valid: true, checkedEvents: this.audit.length, headSequence: this.audit.length || null, headHash: null };
+  }
+
   async submitEvidence(input: Omit<ModelPromotionEvidence, 'id' | 'submittedAt' | 'submittedByCredentialId'> & { actorCredentialId: string; actorTenantId: string }): Promise<ModelPromotionEvidence> {
     const { actorCredentialId, actorTenantId, ...submitted } = input;
     const evidence: ModelPromotionEvidence = { ...submitted, id: randomUUID(), submittedByCredentialId: actorCredentialId, submittedAt: nowIso() };

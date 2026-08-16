@@ -15,6 +15,7 @@ Status: Implemented for model snapshots, tenant policies and budgets, durable cr
 | `GET /v1/admin/tenants/:id/budget` | `admin:read` | Read limit, reserved spend, and settled spend |
 | `PUT /v1/admin/tenants/:id/budget` | `admin:write` | Set a hard USD limit without dropping below current usage |
 | `GET /v1/admin/audit?limit=100&cursor=...` | `admin:read` | Page through administrative mutations, maximum 500 per page |
+| `GET /v1/admin/audit/verify` | `admin:read` | Recompute and verify the complete PostgreSQL audit hash chain; returns 409 when invalid |
 
 `admin:write` implies read access. Ordinary `responses:create` credentials cannot call these routes. Administrative routes always require authentication, even when the response API is allowed to run unauthenticated in development.
 
@@ -53,7 +54,7 @@ Budget creation and request reservation share a tenant advisory lock. Existing r
 
 ## Audit guarantee
 
-PostgreSQL stores the mutation and its audit event in the same transaction. Events contain actor credential ID, actor tenant, action, target, safe details, and timestamp—never bearer keys or provider secrets.
+PostgreSQL stores the mutation and its audit event in the same transaction. Events contain actor credential ID, actor tenant, action, target, safe details, and timestamp—never bearer keys or provider secrets. Migration 016 serializes append ordering and chains every event with SHA-256; see [tamper-evident administrative audit](41-tamper-evident-audit.md).
 
 | Failure | Result |
 |---|---|
@@ -64,7 +65,7 @@ PostgreSQL stores the mutation and its audit event in the same transaction. Even
 
 ## Rollout checklist
 
-1. Apply managed migration `005_admin_audit.sql`.
+1. Apply managed migrations through `016_tamper_evident_audit.sql` during a maintenance window appropriate for the existing audit-row count.
 2. Create separate admin credentials; avoid giving application callers admin scopes.
 3. Publish a snapshot first in a non-production environment and execute one request per enabled provider.
 4. Use `GET /v1/admin/models` to record the resulting version.

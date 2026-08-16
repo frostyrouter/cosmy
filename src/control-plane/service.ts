@@ -90,6 +90,7 @@ export class ControlPlaneService {
   }
 
   listAudit(limit: number) { return this.store.listAudit(limit); }
+  verifyAudit() { return this.store.verifyAudit(); }
 
   async listAuditPage(limit: number, cursor?: string) {
     const rows = await this.store.listAudit(limit + 1, cursor ? decodeAuditCursor(cursor) : undefined);

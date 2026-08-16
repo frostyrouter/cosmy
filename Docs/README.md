@@ -46,6 +46,7 @@ The documentation deliberately separates product intent from implementation deta
 - [Durable tenant policy bundles](38-durable-tenant-policy-bundles.md)
 - [Cached OIDC workload identity](39-oidc-workload-identity.md)
 - [Provider bulkheads and load shedding](40-provider-bulkheads.md)
+- [Tamper-evident administrative audit](41-tamper-evident-audit.md)
 
 ## Decision status vocabulary
 
