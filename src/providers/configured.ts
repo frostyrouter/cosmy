@@ -2,7 +2,7 @@ import type { DataClass, ModelConfiguration } from '../domain/types.js';
 import type { ProviderAdapter } from '../ports/provider.js';
 import type { RequestClassifier } from '../ports/classifier.js';
 import { AnthropicProvider } from './anthropic.js';
-import { DeepSeekV4FlashClassifier } from './deepseek-classifier.js';
+import { JevClassifier } from './jev-classifier.js';
 import { GeminiProvider } from './gemini.js';
 import { OpenAIProvider } from './openai.js';
 import { SimulatorProvider } from './simulator.js';
@@ -61,11 +61,11 @@ export function configuredProviders(env: NodeJS.ProcessEnv, models: readonly Mod
 }
 
 export function configuredClassifier(env: NodeJS.ProcessEnv = process.env): RequestClassifier | undefined {
-  if (!env.DEEPSEEK_API_KEY) return undefined;
-  return new DeepSeekV4FlashClassifier({
-    apiKey: env.DEEPSEEK_API_KEY,
-    ...(env.DEEPSEEK_BASE_URL ? { baseUrl: env.DEEPSEEK_BASE_URL } : {}),
-    ...(env.DEEPSEEK_CLASSIFIER_MODEL ? { model: env.DEEPSEEK_CLASSIFIER_MODEL } : {}),
+  if (!env.TYPESAFE_API_KEY) return undefined;
+  return new JevClassifier({
+    apiKey: env.TYPESAFE_API_KEY,
+    ...(env.TYPESAFE_BASE_URL ? { baseUrl: env.TYPESAFE_BASE_URL } : {}),
+    ...(env.TYPESAFE_CLASSIFIER_MODEL ? { model: env.TYPESAFE_CLASSIFIER_MODEL } : {}),
     ...(env.CLASSIFIER_MAX_INPUT_CHARS ? { maxInputChars: numeric(env.CLASSIFIER_MAX_INPUT_CHARS, 200_000) } : {}),
   });
 }

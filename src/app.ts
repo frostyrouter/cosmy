@@ -63,7 +63,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   if (config.environment === 'production' && !config.allowUnauthenticated && !authenticator) {
     throw new Error('Production requires COSMY_API_CREDENTIALS or explicit ALLOW_UNAUTHENTICATED=true');
   }
-  if (classifierMode === 'fail' && !availableClassifier) throw new Error('DEEPSEEK_API_KEY is required when CLASSIFIER_MODE=fail');
+  if (classifierMode === 'fail' && !availableClassifier) throw new Error('TYPESAFE_API_KEY is required when CLASSIFIER_MODE=fail');
   let postgres: PostgresSqlClient | undefined;
   let rolloutPostgres: PostgresSqlClient | undefined;
   let shadowPostgres: PostgresSqlClient | undefined;

@@ -9,7 +9,7 @@ export * from './registry/default-models.js';
 export * from './registry/memory-registry.js';
 export * from './providers/simulator.js';
 export * from './providers/configured.js';
-export * from './providers/deepseek-classifier.js';
+export * from './providers/jev-classifier.js';
 export * from './execution/resilience.js';
 export * from './observability/metrics.js';
 export * from './ports/stores.js';

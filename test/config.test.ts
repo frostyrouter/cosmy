@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { loadConfig, resolveConfig } from '../src/config.js';
 
 describe('classifier configuration', () => {
-  it('keeps local routing deterministic when no DeepSeek key is configured', () => {
+  it('keeps local routing deterministic when no TypeSafe key is configured', () => {
     expect(loadConfig({ ROUTER_ENV: 'development' }).classifierMode).toBe('disabled');
   });
 
   it('defaults to degradation in development and fail-closed in production', () => {
-    expect(loadConfig({ ROUTER_ENV: 'development', DEEPSEEK_API_KEY: 'test' }).classifierMode).toBe('degrade');
-    expect(loadConfig({ ROUTER_ENV: 'production', DEEPSEEK_API_KEY: 'test' }).classifierMode).toBe('fail');
+    expect(loadConfig({ ROUTER_ENV: 'development', TYPESAFE_API_KEY: 'test' }).classifierMode).toBe('degrade');
+    expect(loadConfig({ ROUTER_ENV: 'production', TYPESAFE_API_KEY: 'test' }).classifierMode).toBe('fail');
     expect(loadConfig({ ROUTER_ENV: 'production' }).classifierMode).toBe('fail');
   });
 

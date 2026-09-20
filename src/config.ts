@@ -101,7 +101,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (configuredClassifierMode !== undefined && !['disabled', 'degrade', 'fail'].includes(configuredClassifierMode)) {
     throw new Error(`Unsupported CLASSIFIER_MODE: ${configuredClassifierMode}`);
   }
-  const defaultClassifierMode = environment === 'production' ? 'fail' : env.DEEPSEEK_API_KEY ? 'degrade' : 'disabled';
+  const defaultClassifierMode = environment === 'production' ? 'fail' : env.TYPESAFE_API_KEY ? 'degrade' : 'disabled';
   const classifierMode = (configuredClassifierMode ?? defaultClassifierMode) as NonNullable<AppConfig['classifierMode']>;
   return validateConfig({
     host: env.HOST ?? '0.0.0.0',

@@ -11,3 +11,13 @@ __pycache__/
 .ruff_cache/
 *.py[cod]
 .DS_Store
+
+# Router 11-axis datasets (large HF blends) — keep samples, ignore full
+data/router-11axis*.jsonl
+data/gemma-sft*.jsonl
+data/*.train.jsonl
+data/*.val.jsonl
+data/*.test.jsonl
+!data/sample-11axis.jsonl
+!data/cosmy-gold-11axis.example.jsonl
+data/report.json
