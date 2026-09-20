@@ -22,6 +22,18 @@ export interface AppConfig {
   registryRefreshSeconds?: number;
   classifierMode?: 'disabled' | 'degrade' | 'fail';
   classifierTimeoutMs?: number;
+  oidcIssuer?: string;
+  oidcAudience?: string;
+  oidcJwksUri?: string;
+  oidcAlgorithms?: readonly string[];
+  oidcTenantClaim?: string;
+  oidcScopeClaim?: string;
+  oidcScopePrefix?: string;
+  oidcTokenType?: string;
+  oidcMaximumTokenAgeSeconds?: number;
+  oidcClockToleranceSeconds?: number;
+  oidcMaximumJwksStaleSeconds?: number;
+  oidcRequestTimeoutMs?: number;
 }
 
 export type AppConfigInput = Partial<AppConfig>;
@@ -81,7 +93,7 @@ function credentialsEnv(value: string | undefined): readonly ApiCredential[] | u
     if (typeof entry !== 'object' || entry === null) throw new Error(`Credential at index ${index} must be an object`);
     const value = entry as Record<string, unknown>;
     const scopes = value.scopes ?? ['responses:create'];
-    const allowedScopes: readonly ApiScope[] = ['responses:create', 'admin:read', 'admin:write', 'metrics:read'];
+    const allowedScopes: readonly ApiScope[] = ['responses:create', 'routing:read', 'admin:read', 'admin:write', 'metrics:read'];
     if (typeof value.id !== 'string' || typeof value.tenantId !== 'string' || typeof value.keySha256 !== 'string' || !Array.isArray(scopes) || scopes.some((scope) => !allowedScopes.includes(scope as ApiScope))) {
       throw new Error(`Credential at index ${index} is invalid`);
     }
@@ -125,6 +137,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     registryRefreshSeconds: nonNegativeIntegerEnv(env.REGISTRY_REFRESH_SECONDS, 15),
     classifierMode,
     classifierTimeoutMs: numberEnv(env.CLASSIFIER_TIMEOUT_MS, 3_000),
+    ...(env.OIDC_ISSUER ? { oidcIssuer: env.OIDC_ISSUER } : {}),
+    ...(env.OIDC_AUDIENCE ? { oidcAudience: env.OIDC_AUDIENCE } : {}),
+    ...(env.OIDC_JWKS_URI ? { oidcJwksUri: env.OIDC_JWKS_URI } : {}),
+    ...(env.OIDC_ALGORITHMS ? { oidcAlgorithms: env.OIDC_ALGORITHMS.split(',').map((value) => value.trim()).filter(Boolean) } : {}),
+    ...(env.OIDC_TENANT_CLAIM ? { oidcTenantClaim: env.OIDC_TENANT_CLAIM } : {}),
+    ...(env.OIDC_SCOPE_CLAIM ? { oidcScopeClaim: env.OIDC_SCOPE_CLAIM } : {}),
+    ...(env.OIDC_SCOPE_PREFIX ? { oidcScopePrefix: env.OIDC_SCOPE_PREFIX } : {}),
+    ...(env.OIDC_TOKEN_TYPE ? { oidcTokenType: env.OIDC_TOKEN_TYPE } : {}),
+    ...(env.OIDC_MAXIMUM_TOKEN_AGE_SECONDS ? { oidcMaximumTokenAgeSeconds: positiveIntegerEnv(env.OIDC_MAXIMUM_TOKEN_AGE_SECONDS, 300) } : {}),
+    ...(env.OIDC_CLOCK_TOLERANCE_SECONDS ? { oidcClockToleranceSeconds: nonNegativeIntegerEnv(env.OIDC_CLOCK_TOLERANCE_SECONDS, 0) } : {}),
+    ...(env.OIDC_MAXIMUM_JWKS_STALE_SECONDS ? { oidcMaximumJwksStaleSeconds: positiveIntegerEnv(env.OIDC_MAXIMUM_JWKS_STALE_SECONDS, 300) } : {}),
+    ...(env.OIDC_REQUEST_TIMEOUT_MS ? { oidcRequestTimeoutMs: positiveIntegerEnv(env.OIDC_REQUEST_TIMEOUT_MS, 3_000) } : {}),
   });
 }
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export type ApiScope = 'responses:create' | 'admin:read' | 'admin:write' | 'metrics:read';
+export type ApiScope = 'responses:create' | 'routing:read' | 'admin:read' | 'admin:write' | 'metrics:read';
 
 export interface ApiCredential {
   id: string;
@@ -17,7 +17,20 @@ export interface RequestPrincipal {
 }
 
 export interface RequestAuthenticator {
-  authenticate(authorization: string | undefined): RequestPrincipal | undefined;
+  authenticate(authorization: string | undefined): RequestPrincipal | undefined | Promise<RequestPrincipal | undefined>;
+}
+
+/** Checks authenticators in order, so local API keys avoid an OIDC verification path. */
+export class CompositeAuthenticator implements RequestAuthenticator {
+  constructor(private readonly authenticators: readonly RequestAuthenticator[]) {}
+
+  async authenticate(authorization: string | undefined): Promise<RequestPrincipal | undefined> {
+    for (const authenticator of this.authenticators) {
+      const principal = await authenticator.authenticate(authorization);
+      if (principal) return principal;
+    }
+    return undefined;
+  }
 }
 
 export function sha256ApiKey(apiKey: string): string {

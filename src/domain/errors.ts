@@ -30,3 +30,11 @@ export class ProviderError extends RouterError {
 export class RequestCancelledError extends RouterError {
   constructor() { super('Request was cancelled', 'request_cancelled', 499); }
 }
+
+export class RouterSaturatedError extends RouterError {
+  constructor() { super('The router is at its configured concurrency limit', 'router_saturated', 503, true); }
+}
+
+export class OutputValidationError extends RouterError {
+  constructor(public readonly issues: readonly string[], public readonly actualCostUsd: number) { super('Provider output did not satisfy the requested JSON schema', 'output_validation_failed', 502, true); }
+}

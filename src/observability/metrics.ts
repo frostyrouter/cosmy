@@ -10,13 +10,15 @@ export interface RequestMetric {
   fallbackIndex: number;
 }
 
-export type OperationalMetric = 'cache_hit' | 'cache_failure' | 'idempotency_store_failure' | 'reconciliation_failure' | 'registry_refresh_failure' | 'reservation_recovered' | 'rollout_observation_failure' | 'rollout_auto_rollback' | 'shadow_job_dropped' | 'shadow_execution_failure' | 'shadow_budget_rejection' | 'shadow_observation_recorded' | 'shadow_reservation_recovered';
+export type OperationalMetric = 'cache_hit' | 'cache_failure' | 'idempotency_store_failure' | 'reconciliation_failure' | 'registry_refresh_failure' | 'reservation_recovered' | 'router_saturated' | 'decision_store_failure' | 'health_store_failure' | 'rollout_observation_failure' | 'rollout_auto_rollback' | 'shadow_job_dropped' | 'shadow_execution_failure' | 'shadow_budget_rejection' | 'shadow_observation_recorded' | 'shadow_reservation_recovered';
 
 export interface MetricsSink {
   record(metric: RequestMetric): void;
   increment?(metric: OperationalMetric, amount?: number): void;
   streamOpened?(): void;
   streamClosed?(): void;
+  responseOpened?(): void;
+  responseClosed?(): void;
   snapshot(): MetricsSnapshot;
   renderPrometheus?(): string;
 }
@@ -28,6 +30,7 @@ export interface MetricsSnapshot {
   cancellations: number;
   fallbacks: number;
   activeStreams: number;
+  activeResponses: number;
   inputTokens: number;
   outputTokens: number;
   totalCostUsd: number;
@@ -50,7 +53,7 @@ interface ProviderSeries {
 }
 
 const MAX_PROVIDER_SERIES = 512;
-const operationalNames: readonly OperationalMetric[] = ['cache_hit', 'cache_failure', 'idempotency_store_failure', 'reconciliation_failure', 'registry_refresh_failure', 'reservation_recovered', 'rollout_observation_failure', 'rollout_auto_rollback', 'shadow_job_dropped', 'shadow_execution_failure', 'shadow_budget_rejection', 'shadow_observation_recorded', 'shadow_reservation_recovered'];
+const operationalNames: readonly OperationalMetric[] = ['cache_hit', 'cache_failure', 'idempotency_store_failure', 'reconciliation_failure', 'registry_refresh_failure', 'reservation_recovered', 'router_saturated', 'decision_store_failure', 'health_store_failure', 'rollout_observation_failure', 'rollout_auto_rollback', 'shadow_job_dropped', 'shadow_execution_failure', 'shadow_budget_rejection', 'shadow_observation_recorded', 'shadow_reservation_recovered'];
 
 export class InMemoryMetrics implements MetricsSink {
   private requests = 0;
@@ -59,6 +62,7 @@ export class InMemoryMetrics implements MetricsSink {
   private cancellations = 0;
   private fallbacks = 0;
   private activeStreams = 0;
+  private activeResponses = 0;
   private inputTokens = 0;
   private outputTokens = 0;
   private totalCostUsd = 0;
@@ -104,13 +108,15 @@ export class InMemoryMetrics implements MetricsSink {
   }
   streamOpened(): void { this.activeStreams += 1; }
   streamClosed(): void { this.activeStreams = Math.max(0, this.activeStreams - 1); }
+  responseOpened(): void { this.activeResponses += 1; }
+  responseClosed(): void { this.activeResponses = Math.max(0, this.activeResponses - 1); }
 
   snapshot(): MetricsSnapshot {
     const count = this.latencyCount;
     const buffered = this.latencies.slice(0, count).sort((a, b) => a - b);
     return {
       requests: this.requests, successes: this.successes, errors: this.errors, cancellations: this.cancellations, fallbacks: this.fallbacks,
-      activeStreams: this.activeStreams, inputTokens: this.inputTokens, outputTokens: this.outputTokens, totalCostUsd: this.totalCostUsd,
+      activeStreams: this.activeStreams, activeResponses: this.activeResponses, inputTokens: this.inputTokens, outputTokens: this.outputTokens, totalCostUsd: this.totalCostUsd,
       operational: { ...this.operational },
       latencyMs: { count, total: this.latencyTotalMs, p95: count ? buffered[Math.min(count - 1, Math.ceil(count * 0.95) - 1)]! : 0 },
     };

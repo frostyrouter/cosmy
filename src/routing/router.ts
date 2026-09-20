@@ -1,6 +1,6 @@
 import { NoRouteError, RequestCancelledError, RouterError } from '../domain/errors.js';
 import type { ClassificationStatus, RequestFeatures, ResponseRequest, RouteCandidate, RouteDecision, RouteMetadata } from '../domain/types.js';
-import type { ModelRegistry } from '../ports/stores.js';
+import type { HealthSnapshotStore, ModelRegistry } from '../ports/stores.js';
 import type { RequestClassifier, RequestClassificationInput } from '../ports/classifier.js';
 import { defaultPolicy, filterEligible, rankCandidates, type Policy } from './policy.js';
 import { extractFeatures, mergeClassification } from './features.js';
@@ -16,6 +16,7 @@ export interface RouterOptions {
   classifierTimeoutMs?: number;
   failureMode?: ClassificationFailureMode;
   admission?: ModelAdmission;
+  health?: HealthSnapshotStore;
 }
 
 const defaultClassifierTimeoutMs = 5_000;
@@ -65,6 +66,7 @@ export class DeterministicRouter {
   private readonly classifierTimeoutMs: number;
   private readonly failureMode: ClassificationFailureMode;
   private readonly admission: ModelAdmission | undefined;
+  private readonly health: HealthSnapshotStore | undefined;
 
   constructor(
     private readonly registry: ModelRegistry,
@@ -78,6 +80,7 @@ export class DeterministicRouter {
     this.classifierTimeoutMs = Math.max(1, routingOptions.classifierTimeoutMs ?? defaultClassifierTimeoutMs);
     this.failureMode = routingOptions.failureMode ?? 'degrade';
     this.admission = routingOptions.admission ?? legacyAdmission;
+    this.health = routingOptions.health;
   }
 
   get policyVersion(): string { return this.policy.version; }
@@ -107,11 +110,13 @@ export class DeterministicRouter {
 
   private buildRoute(requestId: string, request: ResponseRequest, features: RequestFeatures, classificationStatus: ClassificationStatus): RouteDecision {
     const tenantId = request.policy?.tenantId;
-    if (request.model) {
+    if (request.model && request.model !== 'auto') {
       const explicit = this.registry.get(request.model);
       if (!explicit) throw new NoRouteError(`Requested model '${request.model}' is not registered`);
       if (this.admission && !this.admission.allows(explicit, tenantId)) throw new NoRouteError('Requested model is not assigned to this tenant rollout', [{ modelId: explicit.id, reason: 'rollout_not_assigned' }]);
-      const eligibility = filterEligible([explicit], features, request.policy, { bypassInferredQualityFloor: true });
+      const { models, rejected: healthRejected } = this.withObservedHealth([explicit]);
+      const eligibility = filterEligible(models, features, request.policy, { bypassInferredQualityFloor: true });
+      eligibility.rejected.unshift(...healthRejected);
       if (eligibility.eligible.length === 0) throw new NoRouteError('Requested model cannot satisfy this request', eligibility.rejected);
       const selected = rankCandidates(eligibility.eligible, features, request.policy, this.policy)[0];
       if (!selected) throw new NoRouteError('Requested model cannot satisfy this request');
@@ -121,8 +126,9 @@ export class DeterministicRouter {
     const allModels = this.registry.snapshot();
     const rolloutRejected = this.admission ? allModels.filter((model) => !this.admission!.allows(model, tenantId)).map((model) => ({ modelId: model.id, reason: 'rollout_not_assigned' })) : [];
     const admitted = this.admission ? allModels.filter((model) => this.admission!.allows(model, tenantId)) : allModels;
-    const eligibility = filterEligible(admitted, features, request.policy);
-    eligibility.rejected.unshift(...rolloutRejected);
+    const observed = this.withObservedHealth(admitted);
+    const eligibility = filterEligible(observed.models, features, request.policy);
+    eligibility.rejected.unshift(...rolloutRejected, ...observed.rejected);
     const ranked = rankCandidates(eligibility.eligible, features, request.policy, this.policy);
     const initial = ranked[0];
     if (!initial) throw new NoRouteError('No registered model satisfies this request', eligibility.rejected);
@@ -140,5 +146,21 @@ export class DeterministicRouter {
       alternatives = reasoningCandidates.filter((candidate) => candidate.model.id !== selected.model.id).slice(0, 2);
     }
     return { requestId, selected, alternatives, rejected: eligibility.rejected, features, policyVersion: this.policy.version, createdAt: nowIso(), metadata: routeMetadata(classificationStatus, initial.model.id, selected.model.id, promoted) };
+  }
+
+  private withObservedHealth(models: readonly import('../domain/types.js').ModelConfiguration[]): { models: import('../domain/types.js').ModelConfiguration[]; rejected: Array<{ modelId: string; reason: string }> } {
+    const health = this.health;
+    if (!health) return { models: [...models], rejected: [] };
+    const now = Date.now();
+    const unavailable = new Map(health.snapshot().map((snapshot) => [snapshot.modelId, snapshot]));
+    const eligible: import('../domain/types.js').ModelConfiguration[] = [];
+    const rejected: Array<{ modelId: string; reason: string }> = [];
+    for (const model of models) {
+      const snapshot = unavailable.get(model.id);
+      const coolingDown = snapshot && snapshot.consecutiveFailures >= 3 && now - Date.parse(snapshot.updatedAt) < 30_000;
+      if (coolingDown) rejected.push({ modelId: model.id, reason: 'observed_health_unavailable' });
+      else eligible.push(model);
+    }
+    return { models: eligible, rejected };
   }
 }

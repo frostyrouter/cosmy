@@ -1,9 +1,15 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { responseRequestJsonSchema, responseResultJsonSchema } from './json-schemas.js';
 import { NoRouteError, ProviderError, RouterError } from '../domain/errors.js';
-import type { ResponseRequest } from '../domain/types.js';
+import type { ModelConfiguration, ResponseRequest } from '../domain/types.js';
 import type { RouterService } from '../service/router-service.js';
 import type { RequestAuthenticator, RequestPrincipal } from '../security/auth.js';
+import { requestId } from '../util/ids.js';
+import { modelSpaceComparison } from '../model-space/comparison.js';
+
+export interface RoutingQueries {
+  visibleModels(tenantId: string): readonly ModelConfiguration[];
+}
 
 function errorBody(error: unknown, requestId?: string): { error: { code: string; message: string; requestId?: string; retryable?: boolean; details?: unknown } } {
   if (error instanceof NoRouteError) return { error: { code: error.code, message: error.message, ...(requestId ? { requestId } : {}), retryable: error.retryable, details: { rejected: error.rejected } } };
@@ -16,11 +22,11 @@ function writeSse(reply: FastifyReply, event: string, data: unknown): void {
   reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined): RequestPrincipal | undefined {
+async function authorize(authorization: string | undefined, authenticator: RequestAuthenticator | undefined, scope: 'responses:create' | 'routing:read' = 'responses:create'): Promise<RequestPrincipal | undefined> {
   if (!authenticator) return undefined;
-  const principal = authenticator.authenticate(authorization);
+  const principal = await authenticator.authenticate(authorization);
   if (!principal) throw new RouterError('Missing or invalid API key', 'authentication_error', 401);
-  if (!principal.scopes.includes('responses:create')) throw new RouterError('Credential cannot create responses', 'authorization_error', 403);
+  if (!principal.scopes.includes(scope)) throw new RouterError(`Credential requires '${scope}' scope`, 'authorization_error', 403);
   return principal;
 }
 
@@ -40,7 +46,7 @@ function idempotencyKey(value: string | string[] | undefined): string | undefine
   return value;
 }
 
-export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator): void {
+export function registerRoutes(app: FastifyInstance, service: RouterService, readyCheck?: () => Promise<boolean> | boolean, authenticator?: RequestAuthenticator, queries?: RoutingQueries): void {
   app.setErrorHandler((error: FastifyError, _request, reply) => {
     if (error.validation) {
       return reply.code(400).send({ error: { code: 'invalid_request', message: error.message } });
@@ -62,7 +68,7 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     let input: ResponseRequest;
     let requestKey: string | undefined;
     try {
-      input = tenantRequest(submitted, authorize(request.headers.authorization, authenticator));
+      input = { ...tenantRequest(submitted, await authorize(request.headers.authorization, authenticator)), requestId: submitted.requestId ?? requestId() };
       requestKey = idempotencyKey(request.headers['idempotency-key']);
       if (input.stream && requestKey) throw new RouterError('Idempotency-Key is not supported for streaming requests', 'invalid_request', 400);
     } catch (error) {
@@ -105,6 +111,50 @@ export function registerRoutes(app: FastifyInstance, service: RouterService, rea
     } catch (error) {
       request.log.warn({ err: error }, 'request failed');
       const normalized = errorBody(error, input.requestId);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.get<{ Params: { decisionId: string } }>('/v1/routing/decisions/:decisionId', async (request, reply) => {
+    try {
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
+      const record = await service.decision(principal?.tenantId ?? 'anonymous', request.params.decisionId);
+      if (!record) return reply.code(404).send({ error: { code: 'not_found', message: 'Routing decision was not found' } });
+      return record;
+    } catch (error) {
+      const normalized = errorBody(error);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.post('/v1/routing/simulate', { schema: { body: responseRequestJsonSchema } }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
+      const input = { ...tenantRequest(request.body as unknown as ResponseRequest, principal), requestId: (request.body as ResponseRequest).requestId ?? requestId() };
+      return { nonBinding: true, decision: service.simulate(input) };
+    } catch (error) {
+      const normalized = errorBody(error);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.get('/v1/models', async (request, reply) => {
+    try {
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
+      return { data: queries?.visibleModels(principal?.tenantId ?? 'anonymous') ?? [] };
+    } catch (error) {
+      const normalized = errorBody(error);
+      return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
+    }
+  });
+
+  app.get('/v1/model-space', async (request, reply) => {
+    try {
+      if (Object.keys(request.query as Record<string, unknown>).length) throw new RouterError('Model-space query parameters are not supported', 'invalid_request', 400, false);
+      const principal = await authorize(request.headers.authorization, authenticator, 'routing:read');
+      return modelSpaceComparison(queries?.visibleModels(principal?.tenantId ?? 'anonymous') ?? []);
+    } catch (error) {
+      const normalized = errorBody(error);
       return reply.code(error instanceof RouterError ? error.statusCode : 500).send(normalized);
     }
   });

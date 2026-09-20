@@ -21,3 +21,6 @@ data/*.test.jsonl
 !data/sample-11axis.jsonl
 !data/cosmy-gold-11axis.example.jsonl
 data/report.json
+
+# Local training checkpoints are reproducible artifacts, not source-controlled releases.
+checkpoints/

@@ -1,0 +1,4644 @@
+{
+ "summary": {
+  "model": "cosmy-gemma270m-2dp-v2 (fused bf16, 1000iters/3ep, 2dp targets, proper chat template)",
+  "total": 200,
+  "valid": 195,
+  "invalid": 5,
+  "valid_rate": 0.975,
+  "invalid_rate": 0.025,
+  "invalid_reasons": {
+   "axis safetyStakes out of [0,1]": 5
+  },
+  "deep_accuracy": 0.8923076923076924,
+  "per_axis_mae": {
+   "technicalDifficulty": 0.020548921292775833,
+   "reasoningDepth": 0.1314094653654182,
+   "creativity": 0.06593427130633316,
+   "designSkill": 0.10748725557751458,
+   "factualPrecision": 0.1317211137609788,
+   "qualityRequirement": 0.09357793961369378,
+   "ambiguity": 0.1474392020605948,
+   "toolComplexity": 0.09159573980885054,
+   "contextComplexity": 0.059637486505614866,
+   "codingIntensity": 0.07083914397915203,
+   "safetyStakes": 0.1481066478024503
+  },
+  "overall_mae": 0.09711792609757973,
+  "conf_mae": 0.0698974358974359,
+  "avg_max_err": 0.43444405542556885,
+  "perfect_rates": {
+   "0.1": 0.125,
+   "0.15": 0.175,
+   "0.2": 0.175,
+   "0.25": 0.24
+  },
+  "wall_s": 544.2262141704559
+ },
+ "results": [
+  {
+   "id": "eval-0000",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.101027250289917,
+   "max_err": 0.7000000000000001
+  },
+  {
+   "id": "eval-0001",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.393842935562134,
+   "max_err": 0.6921838885585818
+  },
+  {
+   "id": "eval-0002",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.18,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.787639617919922,
+   "max_err": 0.5
+  },
+  {
+   "id": "eval-0003",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.14,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.17,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.745811939239502,
+   "max_err": 0.6421838885585818
+  },
+  {
+   "id": "eval-0004",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.08,
+     "reasoningDepth": 0.72,
+     "creativity": 0.74,
+     "designSkill": 0.27,
+     "factualPrecision": 0.13,
+     "qualityRequirement": 0.35,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.14,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.08,
+     "safetyStakes": 0.1
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.74
+   },
+   "elapsed_s": 2.6690428256988525,
+   "max_err": 0.6007970779778824
+  },
+  {
+   "id": "eval-0005",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.760380268096924,
+   "max_err": 0.6421838885585818
+  },
+  {
+   "id": "eval-0006",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6958110332489014,
+   "max_err": 0.36000000000000004
+  },
+  {
+   "id": "eval-0007",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.713526964187622,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0008",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.25
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6681067943573,
+   "max_err": 0.6855347349164653
+  },
+  {
+   "id": "eval-0009",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.756226062774658,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0010",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7013351917266846,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0011",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.709881067276001,
+   "max_err": 0.42
+  },
+  {
+   "id": "eval-0012",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.688512086868286,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0013",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.894456148147583,
+   "max_err": 0.06000000000000005
+  },
+  {
+   "id": "eval-0014",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.58,
+     "reasoningDepth": 0.62,
+     "creativity": 0.13,
+     "designSkill": 0.27,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.43,
+     "contextComplexity": 0.35,
+     "codingIntensity": 0.29,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6952900886535645,
+   "max_err": 0.11997448112761244
+  },
+  {
+   "id": "eval-0015",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.95
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.6858150959014893,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0016",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7441532611846924,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0017",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.6858036518096924,
+   "max_err": 0.20000000000000007
+  },
+  {
+   "id": "eval-0018",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6840720176696777,
+   "max_err": 0.06999999999999995
+  },
+  {
+   "id": "eval-0019",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6565709114074707,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0020",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.89,
+     "reasoningDepth": 0.85,
+     "creativity": 0.1,
+     "designSkill": 0.12,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.93,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6524460315704346,
+   "max_err": 0.33000000000000007
+  },
+  {
+   "id": "eval-0021",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.2,
+     "designSkill": 0.17,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.25,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.95
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7317607402801514,
+   "max_err": 0.06094950262500398
+  },
+  {
+   "id": "eval-0022",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6490888595581055,
+   "max_err": 0.6581489350995122
+  },
+  {
+   "id": "eval-0023",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.6410491466522217,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0024",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6548938751220703,
+   "max_err": 0.6402601055951177
+  },
+  {
+   "id": "eval-0025",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.68,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.33,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.89,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.8281726837158203,
+   "max_err": 0.6920183851339244
+  },
+  {
+   "id": "eval-0026",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6882269382476807,
+   "max_err": 0.6402601055951177
+  },
+  {
+   "id": "eval-0027",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.25
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.689786911010742,
+   "max_err": 0.6855347349164653
+  },
+  {
+   "id": "eval-0028",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.84,
+     "reasoningDepth": 0.29,
+     "creativity": 0.14,
+     "designSkill": 0.1,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.38,
+     "ambiguity": 0.83,
+     "toolComplexity": 0.27,
+     "contextComplexity": 0.35,
+     "codingIntensity": 0.88,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.68
+   },
+   "elapsed_s": 2.7562379837036133,
+   "max_err": 0.6620183851339244
+  },
+  {
+   "id": "eval-0029",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.68,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.33,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.89,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.680011034011841,
+   "max_err": 0.027981614866075505
+  },
+  {
+   "id": "eval-0030",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.27,
+     "reasoningDepth": 0.35,
+     "creativity": 0.15,
+     "designSkill": 0.18,
+     "factualPrecision": 0.4,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.29,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.782762050628662,
+   "max_err": 0.6399999999999999
+  },
+  {
+   "id": "eval-0031",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.708770990371704,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0032",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.92,
+     "reasoningDepth": 0.89,
+     "creativity": 0.08,
+     "designSkill": 0.14,
+     "factualPrecision": 0.85,
+     "qualityRequirement": 0.4,
+     "ambiguity": 0.11,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.38,
+     "codingIntensity": 0.95,
+     "safetyStakes": 0.17
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.91
+   },
+   "elapsed_s": 2.7442240715026855,
+   "max_err": 0.448687660112452
+  },
+  {
+   "id": "eval-0033",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.93
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "elapsed_s": 2.7382888793945312,
+   "max_err": 0.004979187478939884
+  },
+  {
+   "id": "eval-0034",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.93
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "elapsed_s": 2.69209885597229,
+   "max_err": 0.004979187478939884
+  },
+  {
+   "id": "eval-0035",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7826781272888184,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0036",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.62,
+     "creativity": 0.13,
+     "designSkill": 0.2,
+     "factualPrecision": 0.31,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.671869993209839,
+   "max_err": 0.54
+  },
+  {
+   "id": "eval-0037",
+   "pred_raw": "{\"demandVector\": {\"version\": \"v1\", \"technicalDifficulty\": 0.23, \"reasoningDepth\": 0.33, \"creativity\": 0.17, \"designSkill\": 0.15, \"factualPrecision\": 0.43, \"qualityRequirement\": 0.52, \"ambiguity\": 0.21, \"toolComplexity\": 0.25, \"contextComplexity\": 0.29, \"codingIntensity\": 0.18, \"safetyStakes\": 89}, \"deepReasoningRequired\": false, \"confidence\": 0.14}",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 89
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "error": "axis safetyStakes out of [0,1]",
+   "elapsed_s": 2.732846975326538
+  },
+  {
+   "id": "eval-0038",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.680323839187622,
+   "max_err": 0.06999999999999995
+  },
+  {
+   "id": "eval-0039",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.89,
+     "reasoningDepth": 0.85,
+     "creativity": 0.1,
+     "designSkill": 0.12,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.93,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.700226068496704,
+   "max_err": 0.33000000000000007
+  },
+  {
+   "id": "eval-0040",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.18
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.76070499420166,
+   "max_err": 0.67
+  },
+  {
+   "id": "eval-0041",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.682554244995117,
+   "max_err": 0.7098915256370022
+  },
+  {
+   "id": "eval-0042",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7005341053009033,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0043",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.18
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.729813814163208,
+   "max_err": 0.67
+  },
+  {
+   "id": "eval-0044",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.89,
+     "reasoningDepth": 0.85,
+     "creativity": 0.1,
+     "designSkill": 0.12,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.93,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6670079231262207,
+   "max_err": 0.33000000000000007
+  },
+  {
+   "id": "eval-0045",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6917591094970703,
+   "max_err": 0.6821838885585817
+  },
+  {
+   "id": "eval-0046",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.27,
+     "reasoningDepth": 0.35,
+     "creativity": 0.13,
+     "designSkill": 0.18,
+     "factualPrecision": 0.4,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.29,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6970579624176025,
+   "max_err": 0.6399999999999999
+  },
+  {
+   "id": "eval-0047",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6542768478393555,
+   "max_err": 0.36000000000000004
+  },
+  {
+   "id": "eval-0048",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7172019481658936,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0049",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.757422924041748,
+   "max_err": 0.6921838885585818
+  },
+  {
+   "id": "eval-0050",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.648315906524658,
+   "max_err": 0.6821838885585817
+  },
+  {
+   "id": "eval-0051",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.743666887283325,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0052",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.18
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.6400861740112305,
+   "max_err": 0.67
+  },
+  {
+   "id": "eval-0053",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.68,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.33,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.89,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7217202186584473,
+   "max_err": 0.6920183851339244
+  },
+  {
+   "id": "eval-0054",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.89,
+     "reasoningDepth": 0.85,
+     "creativity": 0.1,
+     "designSkill": 0.12,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.93,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7704100608825684,
+   "max_err": 0.33000000000000007
+  },
+  {
+   "id": "eval-0055",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.08,
+     "reasoningDepth": 0.72,
+     "creativity": 0.74,
+     "designSkill": 0.27,
+     "factualPrecision": 0.13,
+     "qualityRequirement": 0.35,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.14,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.08,
+     "safetyStakes": 0.1
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.74
+   },
+   "elapsed_s": 2.686379909515381,
+   "max_err": 0.6007970779778824
+  },
+  {
+   "id": "eval-0056",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.18,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.663806915283203,
+   "max_err": 0.5
+  },
+  {
+   "id": "eval-0057",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.703001022338867,
+   "max_err": 0.6921838885585818
+  },
+  {
+   "id": "eval-0058",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.646541118621826,
+   "max_err": 0.030000000000000027
+  },
+  {
+   "id": "eval-0059",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.689150094985962,
+   "max_err": 0.37
+  },
+  {
+   "id": "eval-0060",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.18,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.69840669631958,
+   "max_err": 0.5
+  },
+  {
+   "id": "eval-0061",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.27,
+     "reasoningDepth": 0.9,
+     "creativity": 0.13,
+     "designSkill": 0.82,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.83,
+     "toolComplexity": 0.29,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.89
+   },
+   "elapsed_s": 2.6821513175964355,
+   "max_err": 0.6998915256370022
+  },
+  {
+   "id": "eval-0062",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.763932228088379,
+   "max_err": 0.06000000000000005
+  },
+  {
+   "id": "eval-0063",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7423431873321533,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0064",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.18
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.79158878326416,
+   "max_err": 0.67
+  },
+  {
+   "id": "eval-0065",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7540969848632812,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0066",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.78,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.65,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.72,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.89
+   },
+   "elapsed_s": 2.7136189937591553,
+   "max_err": 0.33999999999999997
+  },
+  {
+   "id": "eval-0067",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.691627025604248,
+   "max_err": 0.36
+  },
+  {
+   "id": "eval-0068",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.71748685836792,
+   "max_err": 0.7098915256370022
+  },
+  {
+   "id": "eval-0069",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.714735269546509,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0070",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.6701581478118896,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0071",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.680464744567871,
+   "max_err": 0.36000000000000004
+  },
+  {
+   "id": "eval-0072",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.95
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.697654962539673,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0073",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.784463882446289,
+   "max_err": 0.6821838885585817
+  },
+  {
+   "id": "eval-0074",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.717067003250122,
+   "max_err": 0.6981489350995123
+  },
+  {
+   "id": "eval-0075",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6635661125183105,
+   "max_err": 0.42
+  },
+  {
+   "id": "eval-0076",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.666240930557251,
+   "max_err": 0.6402601055951177
+  },
+  {
+   "id": "eval-0077",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.7292709350585938,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0078",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7168989181518555,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0079",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6665608882904053,
+   "max_err": 0.62
+  },
+  {
+   "id": "eval-0080",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.7029531002044678,
+   "max_err": 0.6402601055951177
+  },
+  {
+   "id": "eval-0081",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6670241355895996,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0082",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.93
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "elapsed_s": 2.6881282329559326,
+   "max_err": 0.004979187478939884
+  },
+  {
+   "id": "eval-0083",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.18,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.717036724090576,
+   "max_err": 0.5
+  },
+  {
+   "id": "eval-0084",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7334799766540527,
+   "max_err": 0.6920183851339244
+  },
+  {
+   "id": "eval-0085",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.93
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "elapsed_s": 2.676790952682495,
+   "max_err": 0.004979187478939884
+  },
+  {
+   "id": "eval-0086",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.8128528594970703,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0087",
+   "pred_raw": "{\"demandVector\": {\"version\": \"v1\", \"technicalDifficulty\": 0.23, \"reasoningDepth\": 0.33, \"creativity\": 0.17, \"designSkill\": 0.15, \"factualPrecision\": 0.43, \"qualityRequirement\": 0.52, \"ambiguity\": 0.21, \"toolComplexity\": 0.25, \"contextComplexity\": 0.29, \"codingIntensity\": 0.18, \"safetyStakes\": 89}, \"deepReasoningRequired\": false, \"confidence\": 0.14}",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 89
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "error": "axis safetyStakes out of [0,1]",
+   "elapsed_s": 2.684390068054199
+  },
+  {
+   "id": "eval-0088",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.8204219341278076,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0089",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.762288808822632,
+   "max_err": 0.6981489350995123
+  },
+  {
+   "id": "eval-0090",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7040350437164307,
+   "max_err": 0.6981489350995123
+  },
+  {
+   "id": "eval-0091",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.89,
+     "reasoningDepth": 0.85,
+     "creativity": 0.1,
+     "designSkill": 0.12,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.93,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.698561191558838,
+   "max_err": 0.6102601055951177
+  },
+  {
+   "id": "eval-0092",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.62,
+     "creativity": 0.13,
+     "designSkill": 0.2,
+     "factualPrecision": 0.57,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7369868755340576,
+   "max_err": 0.6920183851339244
+  },
+  {
+   "id": "eval-0093",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7680699825286865,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0094",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.6973962783813477,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0095",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.58,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.62,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.35,
+     "codingIntensity": 0.29,
+     "safetyStakes": 0.2
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.672132968902588,
+   "max_err": 0.4221838885585818
+  },
+  {
+   "id": "eval-0096",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.69052791595459,
+   "max_err": 0.6581489350995122
+  },
+  {
+   "id": "eval-0097",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.790523052215576,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0098",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.893962860107422,
+   "max_err": 0.6402601055951177
+  },
+  {
+   "id": "eval-0099",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.8282470703125,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0100",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.8040058612823486,
+   "max_err": 0.06999999999999995
+  },
+  {
+   "id": "eval-0101",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.78,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.65,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.72,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.89
+   },
+   "elapsed_s": 2.743248701095581,
+   "max_err": 0.33999999999999997
+  },
+  {
+   "id": "eval-0102",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.89
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "elapsed_s": 2.83060884475708,
+   "max_err": 0.35000000000000003
+  },
+  {
+   "id": "eval-0103",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.740314245223999,
+   "max_err": 0.36000000000000004
+  },
+  {
+   "id": "eval-0104",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.709583044052124,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0105",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.7224819660186768,
+   "max_err": 0.6402601055951177
+  },
+  {
+   "id": "eval-0106",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.18
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.8121421337127686,
+   "max_err": 0.67
+  },
+  {
+   "id": "eval-0107",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.08,
+     "reasoningDepth": 0.72,
+     "creativity": 0.74,
+     "designSkill": 0.27,
+     "factualPrecision": 0.13,
+     "qualityRequirement": 0.35,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.14,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.08,
+     "safetyStakes": 0.1
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.74
+   },
+   "elapsed_s": 2.7666730880737305,
+   "max_err": 0.6685247834990176
+  },
+  {
+   "id": "eval-0108",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.14,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.17,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7495951652526855,
+   "max_err": 0.6421838885585818
+  },
+  {
+   "id": "eval-0109",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.7173409461975098,
+   "max_err": 0.6921838885585818
+  },
+  {
+   "id": "eval-0110",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.707832098007202,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0111",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.9627180099487305,
+   "max_err": 0.06000000000000005
+  },
+  {
+   "id": "eval-0112",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.8498828411102295,
+   "max_err": 0.51
+  },
+  {
+   "id": "eval-0113",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6862730979919434,
+   "max_err": 0.030000000000000027
+  },
+  {
+   "id": "eval-0114",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6926658153533936,
+   "max_err": 0.6402601055951177
+  },
+  {
+   "id": "eval-0115",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.92,
+     "reasoningDepth": 0.89,
+     "creativity": 0.08,
+     "designSkill": 0.14,
+     "factualPrecision": 0.85,
+     "qualityRequirement": 0.4,
+     "ambiguity": 0.11,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.38,
+     "codingIntensity": 0.95,
+     "safetyStakes": 0.17
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.91
+   },
+   "elapsed_s": 2.7156519889831543,
+   "max_err": 0.448687660112452
+  },
+  {
+   "id": "eval-0116",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.25
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7758138179779053,
+   "max_err": 0.6855347349164653
+  },
+  {
+   "id": "eval-0117",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.93
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "elapsed_s": 2.729459762573242,
+   "max_err": 0.004979187478939884
+  },
+  {
+   "id": "eval-0118",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.84,
+     "reasoningDepth": 0.29,
+     "creativity": 0.14,
+     "designSkill": 0.1,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.38,
+     "ambiguity": 0.83,
+     "toolComplexity": 0.27,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.88,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.68
+   },
+   "elapsed_s": 2.672703981399536,
+   "max_err": 0.6620183851339244
+  },
+  {
+   "id": "eval-0119",
+   "pred_raw": "{\"demandVector\": {\"version\": \"v1\", \"technicalDifficulty\": 0.23, \"reasoningDepth\": 0.33, \"creativity\": 0.17, \"designSkill\": 0.15, \"factualPrecision\": 0.43, \"qualityRequirement\": 0.52, \"ambiguity\": 0.21, \"toolComplexity\": 0.25, \"contextComplexity\": 0.29, \"codingIntensity\": 0.18, \"safetyStakes\": 89}, \"deepReasoningRequired\": false, \"confidence\": 0.14}",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 89
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "error": "axis safetyStakes out of [0,1]",
+   "elapsed_s": 2.728079080581665
+  },
+  {
+   "id": "eval-0120",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7552199363708496,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0121",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.9575932025909424,
+   "max_err": 0.6581489350995122
+  },
+  {
+   "id": "eval-0122",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.27,
+     "reasoningDepth": 0.35,
+     "creativity": 0.13,
+     "designSkill": 0.18,
+     "factualPrecision": 0.4,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.29,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.811404228210449,
+   "max_err": 0.6399999999999999
+  },
+  {
+   "id": "eval-0123",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.58,
+     "reasoningDepth": 0.62,
+     "creativity": 0.13,
+     "designSkill": 0.27,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.43,
+     "contextComplexity": 0.35,
+     "codingIntensity": 0.29,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.808424949645996,
+   "max_err": 0.11997448112761244
+  },
+  {
+   "id": "eval-0124",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.8314208984375,
+   "max_err": 0.6821838885585817
+  },
+  {
+   "id": "eval-0125",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.9033689498901367,
+   "max_err": 0.42
+  },
+  {
+   "id": "eval-0126",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.58,
+     "reasoningDepth": 0.92,
+     "creativity": 0.23,
+     "designSkill": 0.89,
+     "factualPrecision": 0.31,
+     "qualityRequirement": 0.55,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.29,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.2,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.95
+   },
+   "elapsed_s": 2.736150026321411,
+   "max_err": 0.6921838885585818
+  },
+  {
+   "id": "eval-0127",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7189278602600098,
+   "max_err": 0.20000000000000007
+  },
+  {
+   "id": "eval-0128",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.89,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.768655776977539,
+   "max_err": 0.7220183851339245
+  },
+  {
+   "id": "eval-0129",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.18
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7458481788635254,
+   "max_err": 0.67
+  },
+  {
+   "id": "eval-0130",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.809540033340454,
+   "max_err": 0.7398915256370021
+  },
+  {
+   "id": "eval-0131",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.95
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.827324867248535,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0132",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.84,
+     "reasoningDepth": 0.29,
+     "creativity": 0.14,
+     "designSkill": 0.1,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.38,
+     "ambiguity": 0.83,
+     "toolComplexity": 0.27,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.88,
+     "safetyStakes": 0.51
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.616426944732666,
+   "max_err": 0.6881489350995122
+  },
+  {
+   "id": "eval-0133",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.68,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.33,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.89,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6317949295043945,
+   "max_err": 0.027981614866075505
+  },
+  {
+   "id": "eval-0134",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.68,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.33,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.89,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6547441482543945,
+   "max_err": 0.027981614866075505
+  },
+  {
+   "id": "eval-0135",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.9082963466644287,
+   "max_err": 0.708148935099512
+  },
+  {
+   "id": "eval-0136",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7086946964263916,
+   "max_err": 0.42
+  },
+  {
+   "id": "eval-0137",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.8714969158172607,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0138",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.78,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.65,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.72,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.89
+   },
+   "elapsed_s": 2.756744146347046,
+   "max_err": 0.33999999999999997
+  },
+  {
+   "id": "eval-0139",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6412601470947266,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0140",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.5792059898376465,
+   "max_err": 0.030000000000000027
+  },
+  {
+   "id": "eval-0141",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.58,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.62,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.35,
+     "codingIntensity": 0.29,
+     "safetyStakes": 0.2
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7382750511169434,
+   "max_err": 0.4221838885585818
+  },
+  {
+   "id": "eval-0142",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.92,
+     "reasoningDepth": 0.89,
+     "creativity": 0.08,
+     "designSkill": 0.14,
+     "factualPrecision": 0.85,
+     "qualityRequirement": 0.4,
+     "ambiguity": 0.11,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.38,
+     "codingIntensity": 0.95,
+     "safetyStakes": 0.17
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.91
+   },
+   "elapsed_s": 2.772735834121704,
+   "max_err": 0.448687660112452
+  },
+  {
+   "id": "eval-0143",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.794050693511963,
+   "max_err": 0.6821838885585817
+  },
+  {
+   "id": "eval-0144",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7549521923065186,
+   "max_err": 0.6421838885585818
+  },
+  {
+   "id": "eval-0145",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7341978549957275,
+   "max_err": 0.7081489350995123
+  },
+  {
+   "id": "eval-0146",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.84,
+     "reasoningDepth": 0.29,
+     "creativity": 0.14,
+     "designSkill": 0.1,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.38,
+     "ambiguity": 0.83,
+     "toolComplexity": 0.27,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.88,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.68
+   },
+   "elapsed_s": 2.712951183319092,
+   "max_err": 0.6620183851339244
+  },
+  {
+   "id": "eval-0147",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7174160480499268,
+   "max_err": 0.6421838885585818
+  },
+  {
+   "id": "eval-0148",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.14,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.17,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6926307678222656,
+   "max_err": 0.6421838885585818
+  },
+  {
+   "id": "eval-0149",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7908501625061035,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0150",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.691391944885254,
+   "max_err": 0.36000000000000004
+  },
+  {
+   "id": "eval-0151",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.64164400100708,
+   "max_err": 0.51
+  },
+  {
+   "id": "eval-0152",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7138800621032715,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0153",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.6922249794006348,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0154",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.791919231414795,
+   "max_err": 0.7098915256370022
+  },
+  {
+   "id": "eval-0155",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.08,
+     "reasoningDepth": 0.72,
+     "creativity": 0.74,
+     "designSkill": 0.27,
+     "factualPrecision": 0.13,
+     "qualityRequirement": 0.35,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.14,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.08,
+     "safetyStakes": 0.1
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.74
+   },
+   "elapsed_s": 2.691401958465576,
+   "max_err": 0.6685247834990176
+  },
+  {
+   "id": "eval-0156",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6180570125579834,
+   "max_err": 0.030000000000000027
+  },
+  {
+   "id": "eval-0157",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.6939797401428223,
+   "max_err": 0.06000000000000005
+  },
+  {
+   "id": "eval-0158",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7407569885253906,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0159",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.18,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7596921920776367,
+   "max_err": 0.5
+  },
+  {
+   "id": "eval-0160",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.78,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.65,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.72,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.89
+   },
+   "elapsed_s": 2.6892640590667725,
+   "max_err": 0.33999999999999997
+  },
+  {
+   "id": "eval-0161",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6670029163360596,
+   "max_err": 0.7198915256370022
+  },
+  {
+   "id": "eval-0162",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6343817710876465,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0163",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.84,
+     "reasoningDepth": 0.29,
+     "creativity": 0.14,
+     "designSkill": 0.1,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.38,
+     "ambiguity": 0.83,
+     "toolComplexity": 0.27,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.88,
+     "safetyStakes": 0.51
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6830360889434814,
+   "max_err": 0.6881489350995122
+  },
+  {
+   "id": "eval-0164",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7604739665985107,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0165",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.708462953567505,
+   "max_err": 0.41000000000000003
+  },
+  {
+   "id": "eval-0166",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.702570915222168,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0167",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.6763579845428467,
+   "max_err": 0.20000000000000007
+  },
+  {
+   "id": "eval-0168",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6882808208465576,
+   "max_err": 0.51
+  },
+  {
+   "id": "eval-0169",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.78,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.65,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.72,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.89
+   },
+   "elapsed_s": 2.7651262283325195,
+   "max_err": 0.33999999999999997
+  },
+  {
+   "id": "eval-0170",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.702270984649658,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0171",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6980581283569336,
+   "max_err": 0.6820183851339244
+  },
+  {
+   "id": "eval-0172",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.89,
+     "reasoningDepth": 0.85,
+     "creativity": 0.1,
+     "designSkill": 0.12,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.93,
+     "safetyStakes": 0.21
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7169582843780518,
+   "max_err": 0.6481489350995123
+  },
+  {
+   "id": "eval-0173",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7470011711120605,
+   "max_err": 0.030000000000000027
+  },
+  {
+   "id": "eval-0174",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.58,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.62,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.35,
+     "codingIntensity": 0.29,
+     "safetyStakes": 0.2
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.672729015350342,
+   "max_err": 0.4221838885585818
+  },
+  {
+   "id": "eval-0175",
+   "pred_raw": "{\"demandVector\": {\"version\": \"v1\", \"technicalDifficulty\": 0.23, \"reasoningDepth\": 0.33, \"creativity\": 0.17, \"designSkill\": 0.15, \"factualPrecision\": 0.43, \"qualityRequirement\": 0.52, \"ambiguity\": 0.21, \"toolComplexity\": 0.25, \"contextComplexity\": 0.29, \"codingIntensity\": 0.18, \"safetyStakes\": 89}, \"deepReasoningRequired\": false, \"confidence\": 0.14}",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 89
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "error": "axis safetyStakes out of [0,1]",
+   "elapsed_s": 2.682706117630005
+  },
+  {
+   "id": "eval-0176",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.08,
+     "reasoningDepth": 0.72,
+     "creativity": 0.74,
+     "designSkill": 0.27,
+     "factualPrecision": 0.13,
+     "qualityRequirement": 0.35,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.14,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.08,
+     "safetyStakes": 0.1
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.74
+   },
+   "elapsed_s": 2.6454968452453613,
+   "max_err": 0.6007970779778824
+  },
+  {
+   "id": "eval-0177",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.659841775894165,
+   "max_err": 0.42
+  },
+  {
+   "id": "eval-0178",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.95
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.781751871109009,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0179",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.92,
+     "reasoningDepth": 0.89,
+     "creativity": 0.08,
+     "designSkill": 0.14,
+     "factualPrecision": 0.85,
+     "qualityRequirement": 0.4,
+     "ambiguity": 0.11,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.38,
+     "codingIntensity": 0.95,
+     "safetyStakes": 0.17
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.91
+   },
+   "elapsed_s": 2.673175096511841,
+   "max_err": 0.448687660112452
+  },
+  {
+   "id": "eval-0180",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.12,
+     "reasoningDepth": 0.17,
+     "creativity": 0.82,
+     "designSkill": 0.14,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.18,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.11,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.8
+   },
+   "elapsed_s": 2.617147922515869,
+   "max_err": 0.00444251681165897
+  },
+  {
+   "id": "eval-0181",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.92,
+     "reasoningDepth": 0.89,
+     "creativity": 0.08,
+     "designSkill": 0.14,
+     "factualPrecision": 0.85,
+     "qualityRequirement": 0.4,
+     "ambiguity": 0.11,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.38,
+     "codingIntensity": 0.95,
+     "safetyStakes": 0.17
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.91
+   },
+   "elapsed_s": 2.682378053665161,
+   "max_err": 0.448687660112452
+  },
+  {
+   "id": "eval-0182",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.8170230388641357,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0183",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.95
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7096118927001953,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0184",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.08,
+     "reasoningDepth": 0.72,
+     "creativity": 0.74,
+     "designSkill": 0.27,
+     "factualPrecision": 0.13,
+     "qualityRequirement": 0.35,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.14,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.08,
+     "safetyStakes": 0.1
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.74
+   },
+   "elapsed_s": 2.6341300010681152,
+   "max_err": 0.6007970779778824
+  },
+  {
+   "id": "eval-0185",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.93
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "elapsed_s": 2.666625738143921,
+   "max_err": 0.004979187478939884
+  },
+  {
+   "id": "eval-0186",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.27,
+     "reasoningDepth": 0.35,
+     "creativity": 0.15,
+     "designSkill": 0.18,
+     "factualPrecision": 0.4,
+     "qualityRequirement": 0.57,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.29,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.82
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7349720001220703,
+   "max_err": 0.6399999999999999
+  },
+  {
+   "id": "eval-0187",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 2.7321321964263916,
+   "max_err": 0.21999999999999997
+  },
+  {
+   "id": "eval-0188",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.84,
+     "reasoningDepth": 0.29,
+     "creativity": 0.14,
+     "designSkill": 0.1,
+     "factualPrecision": 0.21,
+     "qualityRequirement": 0.38,
+     "ambiguity": 0.83,
+     "toolComplexity": 0.27,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.88,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.68
+   },
+   "elapsed_s": 2.6932811737060547,
+   "max_err": 0.38999999999999996
+  },
+  {
+   "id": "eval-0189",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.88,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.609138011932373,
+   "max_err": 0.6955347349164653
+  },
+  {
+   "id": "eval-0190",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.15,
+     "reasoningDepth": 0.2,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.18,
+     "qualityRequirement": 0.29,
+     "ambiguity": 0.82,
+     "toolComplexity": 0.17,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.13,
+     "safetyStakes": 0.12
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.63
+   },
+   "elapsed_s": 2.6723599433898926,
+   "max_err": 0.06999999999999995
+  },
+  {
+   "id": "eval-0191",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.92,
+     "reasoningDepth": 0.89,
+     "creativity": 0.08,
+     "designSkill": 0.14,
+     "factualPrecision": 0.85,
+     "qualityRequirement": 0.4,
+     "ambiguity": 0.11,
+     "toolComplexity": 0.45,
+     "contextComplexity": 0.38,
+     "codingIntensity": 0.95,
+     "safetyStakes": 0.17
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.91
+   },
+   "elapsed_s": 2.7410621643066406,
+   "max_err": 0.448687660112452
+  },
+  {
+   "id": "eval-0192",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7526698112487793,
+   "max_err": 0.7098915256370022
+  },
+  {
+   "id": "eval-0193",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.8711869716644287,
+   "max_err": 0.7098915256370022
+  },
+  {
+   "id": "eval-0194",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.17,
+     "reasoningDepth": 0.31,
+     "creativity": 0.21,
+     "designSkill": 0.91,
+     "factualPrecision": 0.25,
+     "qualityRequirement": 0.43,
+     "ambiguity": 0.2,
+     "toolComplexity": 0.2,
+     "contextComplexity": 0.27,
+     "codingIntensity": 0.14,
+     "safetyStakes": 0.13
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.716938018798828,
+   "max_err": 0.030000000000000027
+  },
+  {
+   "id": "eval-0195",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.27,
+     "creativity": 0.23,
+     "designSkill": 0.14,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.32,
+     "ambiguity": 0.13,
+     "toolComplexity": 0.21,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 0.14
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.62
+   },
+   "elapsed_s": 3.100950002670288,
+   "max_err": 0.11973989440488234
+  },
+  {
+   "id": "eval-0196",
+   "pred_raw": "{\"demandVector\": {\"version\": \"v1\", \"technicalDifficulty\": 0.23, \"reasoningDepth\": 0.33, \"creativity\": 0.17, \"designSkill\": 0.15, \"factualPrecision\": 0.43, \"qualityRequirement\": 0.52, \"ambiguity\": 0.21, \"toolComplexity\": 0.25, \"contextComplexity\": 0.29, \"codingIntensity\": 0.18, \"safetyStakes\": 89}, \"deepReasoningRequired\": false, \"confidence\": 0.14}",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.23,
+     "reasoningDepth": 0.33,
+     "creativity": 0.17,
+     "designSkill": 0.15,
+     "factualPrecision": 0.43,
+     "qualityRequirement": 0.52,
+     "ambiguity": 0.21,
+     "toolComplexity": 0.25,
+     "contextComplexity": 0.29,
+     "codingIntensity": 0.18,
+     "safetyStakes": 89
+    },
+    "deepReasoningRequired": false,
+    "confidence": 0.14
+   },
+   "error": "axis safetyStakes out of [0,1]",
+   "elapsed_s": 2.6671485900878906
+  },
+  {
+   "id": "eval-0197",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.78,
+     "reasoningDepth": 0.38,
+     "creativity": 0.12,
+     "designSkill": 0.12,
+     "factualPrecision": 0.33,
+     "qualityRequirement": 0.45,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.65,
+     "contextComplexity": 0.31,
+     "codingIntensity": 0.72,
+     "safetyStakes": 0.15
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.89
+   },
+   "elapsed_s": 2.797752857208252,
+   "max_err": 0.7081489350995123
+  },
+  {
+   "id": "eval-0198",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.35,
+     "reasoningDepth": 0.88,
+     "creativity": 0.12,
+     "designSkill": 0.84,
+     "factualPrecision": 0.35,
+     "qualityRequirement": 0.48,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.31,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.25,
+     "safetyStakes": 0.55
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.7164981365203857,
+   "max_err": 0.6920183851339244
+  },
+  {
+   "id": "eval-0199",
+   "pred": {
+    "demandVector": {
+     "version": "v1",
+     "technicalDifficulty": 0.72,
+     "reasoningDepth": 0.45,
+     "creativity": 0.1,
+     "designSkill": 0.11,
+     "factualPrecision": 0.48,
+     "qualityRequirement": 0.62,
+     "ambiguity": 0.14,
+     "toolComplexity": 0.38,
+     "contextComplexity": 0.33,
+     "codingIntensity": 0.52,
+     "safetyStakes": 0.85
+    },
+    "deepReasoningRequired": true,
+    "confidence": 0.87
+   },
+   "elapsed_s": 2.6907899379730225,
+   "max_err": 0.6820183851339244
+  }
+ ]
+}
