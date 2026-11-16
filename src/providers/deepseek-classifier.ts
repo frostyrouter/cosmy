@@ -69,7 +69,8 @@ export interface DeepSeekClassifierOptions {
 function classifierRequest(input: RequestClassificationInput, maxInputChars: number): string {
   const { request, deterministicFeatures } = input;
   const value = JSON.stringify({
-    messages: request.messages.map(({ role, content }) => ({ role, content })),
+    // Tool results are untrusted external data and must not steer route classification.
+    messages: request.messages.filter(({ role }) => role !== 'tool').map(({ role, content }) => ({ role, content })),
     tools: request.tools?.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) ?? [],
     responseFormat: request.responseFormat?.type ?? 'text',
     stream: request.stream === true,

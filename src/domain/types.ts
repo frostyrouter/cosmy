@@ -3,10 +3,19 @@ export type Capability = 'streaming' | 'tools' | 'structured-output' | 'vision' 
 export type DataClass = 'public' | 'internal' | 'confidential' | 'restricted';
 export type RouteStatus = 'completed' | 'failed' | 'cancelled';
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   name?: string;
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+  toolError?: boolean;
 }
 
 export interface ResponseRequest {
@@ -43,6 +52,13 @@ export interface PolicyHints {
   preferProvider?: string;
   requireCapabilities?: Capability[];
   allowFallback?: boolean;
+  /** Server-resolved tenant policy constraints. These are not client-settable API fields. */
+  tenantPolicyVersion?: number;
+  allowedRegions?: readonly string[];
+  allowedProviders?: readonly string[];
+  deniedProviders?: readonly string[];
+  allowedModels?: readonly string[];
+  deniedModels?: readonly string[];
 }
 
 export interface ModelCoordinates {
@@ -111,6 +127,7 @@ export interface ReasoningGateMetadata {
 export interface RouteMetadata {
   classificationStatus: ClassificationStatus;
   reasoningGate: ReasoningGateMetadata;
+  execution?: { plannedModelId: string; servedModelId: string; fallbackIndex: number };
 }
 
 export interface ModelPricing {
@@ -203,8 +220,9 @@ export interface ResponseResult {
   output: string;
   usage: Usage;
   status: RouteStatus;
-  finishReason: 'stop' | 'length' | 'error' | 'cancelled';
+  finishReason: 'stop' | 'length' | 'error' | 'cancelled' | 'tool_calls';
   route: RouteDecision;
+  toolCalls?: ToolCall[];
 }
 
 export interface ResponseChunk {
@@ -213,4 +231,33 @@ export interface ResponseChunk {
   delta: string;
   done: boolean;
   usage?: Usage;
+  type?: 'response.created' | 'response.route.selected' | 'response.output_text.delta' | 'response.output_item.added' | 'response.tool_call.arguments.delta' | 'response.output_item.done' | 'response.usage.updated' | 'response.completed' | 'response.failed' | 'text-delta' | 'completed';
+}
+
+export type DecisionState = 'planned' | 'completed' | 'failed' | 'rejected' | 'cancelled';
+
+export interface DecisionAttempt {
+  index: number;
+  modelId: string;
+  model: string;
+  provider: string;
+  status: RouteStatus;
+  startedAt: string;
+  completedAt?: string;
+  latencyMs?: number;
+  errorCode?: string;
+  usage?: Usage;
+}
+
+export interface DecisionRecord {
+  id: string;
+  tenantId: string;
+  state: DecisionState;
+  route?: RouteDecision;
+  attempts: DecisionAttempt[];
+  outcome?: Pick<ResponseResult, 'provider' | 'model' | 'status' | 'finishReason' | 'usage'>;
+  rejection?: { code: string; statusCode: number; retryable: boolean };
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
 }

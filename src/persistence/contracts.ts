@@ -1,4 +1,4 @@
-import type { ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
+import type { DecisionRecord, ModelConfiguration, ResponseResult, Usage } from '../domain/types.js';
 import type { BudgetSnapshot, ModelHealthSnapshot, RegistrySnapshot, UsageReservation } from '../ports/stores.js';
 import type { ModelPromotionEvidence } from '../control-plane/promotion.js';
 import type { ModelRollout, RolloutOutcome } from '../rollouts/rollout.js';
@@ -49,6 +49,32 @@ export interface AuditEvent {
   target: string;
   details: Record<string, unknown>;
   occurredAt: string;
+}
+
+export interface AuditPosition {
+  id: string;
+  occurredAt: string;
+}
+
+export interface DecisionStore {
+  save(record: DecisionRecord): Promise<void>;
+  get(tenantId: string, decisionId: string): Promise<DecisionRecord | undefined>;
+}
+
+export interface ManagedApiCredential {
+  id: string;
+  tenantId: string;
+  keySha256: string;
+  scopes: readonly import('../security/auth.js').ApiScope[];
+  disabled?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CredentialStore {
+  listCredentials(): Promise<readonly ManagedApiCredential[]>;
+  createCredential(input: { id: string; tenantId: string; keySha256: string; scopes: readonly import('../security/auth.js').ApiScope[]; actorCredentialId: string; actorTenantId: string }): Promise<ManagedApiCredential>;
+  disableCredential(input: { id: string; actorCredentialId: string; actorTenantId: string }): Promise<ManagedApiCredential>;
 }
 
 export interface ControlPlaneStore {

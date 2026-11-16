@@ -16,9 +16,9 @@ The routing classifier is configured separately from executable providers:
 
 | Component | API key | Model |
 | --- | --- | --- |
-| DeepSeek classifier | `DEEPSEEK_API_KEY` | `DEEPSEEK_CLASSIFIER_MODEL` (default `deepseek-v4-flash`) |
+| TypeSafe Jev classifier | `TYPESAFE_API_KEY` | `TYPESAFE_CLASSIFIER_MODEL` (default `jev-latest`) |
 
-`CLASSIFIER_MODE` accepts `disabled`, `degrade`, or `fail`. Development defaults to `degrade` when a DeepSeek key is present; production defaults to `fail` and therefore refuses startup without a classifier. `CLASSIFIER_TIMEOUT_MS` defaults to 3000 and `CLASSIFIER_MAX_INPUT_CHARS` defaults to 200000. The classifier is not registered as an executable response provider and cannot select a model directly.
+`CLASSIFIER_MODE` accepts `disabled`, `degrade`, or `fail`. Development defaults to `degrade` when a TypeSafe key is present; production defaults to `fail` and therefore refuses startup without a classifier. `CLASSIFIER_TIMEOUT_MS` defaults to 3000 and `CLASSIFIER_MAX_INPUT_CHARS` defaults to 200000. The classifier is not registered as an executable response provider and cannot select a model directly.
 
 Optional `*_BASE_URL` variables support a compatible gateway or test server. The model manifest also accepts provider-specific quality, coordinate, region, context, output, and price variables. Pricing must be configured from the provider account or an approved catalog before production routing; development defaults are estimates only.
 

@@ -122,7 +122,7 @@ Errors: timeout, invalid output, provider unavailable.
 
 Invariants: classifier cannot modify policy; output ranges are validated.
 
-Phase-1 implementation: `RequestClassifier` is a replaceable port and `DeepSeekV4FlashClassifier` calls `/chat/completions` with a forced strict `classify_request` tool schema, thinking disabled, bounded input, caller cancellation, and strict local Zod validation.
+Phase-1 implementation: `RequestClassifier` is a replaceable port and `JevClassifier` calls TypeSafe's `/v1/systemone` with one Score question per demand axis plus a Noul question for deep reasoning — all evaluated in parallel in a single call — with bounded input, caller cancellation, and strict local Zod validation.
 
 ## `features/extractRequestFeatures`
 

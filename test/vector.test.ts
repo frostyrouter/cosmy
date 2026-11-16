@@ -46,7 +46,7 @@ describe('request classification contract', () => {
       demandVector: validVector,
       deepReasoningRequired: true,
       confidence: 0.92,
-      classifierMetadata: { provider: 'deepseek', model: 'v4-flash', classifierVersion: 'v1' },
+      classifierMetadata: { provider: 'typesafe', model: 'jev-latest', classifierVersion: 'jev-demand-v1' },
     });
     expect(classification.deepReasoningRequired).toBe(true);
     expect(classification.confidence).toBe(0.92);

@@ -23,7 +23,9 @@ import { applyControlPlaneMigration, createPostgresSqlClient, type PostgresSqlCl
 import { PostgresControlPlaneStore, PostgresIdempotencyStore, PostgresRegistryRepository, PostgresReservationRepository } from './persistence/sql-adapters.js';
 import { InMemoryResponseCache } from './persistence/memory-cache.js';
 import { InMemoryIdempotencyStore } from './persistence/memory-idempotency.js';
-import { sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
+import { CompositeAuthenticator, sha256ApiKey, StaticApiKeyAuthenticator, type RequestAuthenticator } from './security/auth.js';
+import { CachedOidcAuthenticator, type OidcFetcher } from './security/oidc-auth.js';
+import { InMemoryDecisionStore } from './persistence/memory-decisions.js';
 import { InMemoryControlPlaneStore } from './control-plane/memory-store.js';
 import { ControlPlaneService } from './control-plane/service.js';
 import { InMemoryRolloutRegistry, type RolloutOutcome } from './rollouts/rollout.js';
@@ -39,8 +41,10 @@ export interface AppDependencies {
   cache?: import('./persistence/contracts.js').ResponseCache;
   authenticator?: RequestAuthenticator;
   idempotency?: import('./persistence/contracts.js').IdempotencyStore;
+  decisions?: import('./persistence/contracts.js').DecisionStore;
   classifier?: RequestClassifier | null;
   env?: NodeJS.ProcessEnv;
+  oidcFetcher?: OidcFetcher;
 }
 
 export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: AppDependencies = {}): Promise<FastifyInstance> {
@@ -59,11 +63,27 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
   const rateLimitMax = config.rateLimitMax ?? (config.environment === 'production' ? 120 : 1_000);
   if (rateLimitMax > 0) await app.register(rateLimit, { max: rateLimitMax, timeWindow: '1 minute' });
   const configuredCredentials = config.apiCredentials ?? (config.apiKey ? [{ id: 'legacy', tenantId: 'default', keySha256: sha256ApiKey(config.apiKey), scopes: ['responses:create' as const] }] : []);
-  const authenticator = dependencies.authenticator ?? (configuredCredentials.length ? new StaticApiKeyAuthenticator(configuredCredentials) : undefined);
+  const authenticators: RequestAuthenticator[] = [];
+  if (configuredCredentials.length) authenticators.push(new StaticApiKeyAuthenticator(configuredCredentials));
+  const oidcConfigured = Boolean(config.oidcIssuer || config.oidcAudience || config.oidcJwksUri);
+  if (oidcConfigured) {
+    if (!config.oidcIssuer || !config.oidcAudience || !config.oidcJwksUri) throw new Error('OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URI must be configured together');
+    const oidc = new CachedOidcAuthenticator({
+      issuer: config.oidcIssuer, audience: config.oidcAudience, jwksUri: config.oidcJwksUri,
+      algorithms: config.oidcAlgorithms ?? ['RS256'], tenantClaim: config.oidcTenantClaim ?? 'tenant_id', scopeClaim: config.oidcScopeClaim ?? 'scope',
+      scopePrefix: config.oidcScopePrefix ?? 'cosmy:', maximumTokenAgeSeconds: config.oidcMaximumTokenAgeSeconds ?? 300,
+      clockToleranceSeconds: config.oidcClockToleranceSeconds ?? 0, maximumJwksStaleSeconds: config.oidcMaximumJwksStaleSeconds ?? 300,
+      requestTimeoutMs: config.oidcRequestTimeoutMs ?? 3_000, ...(config.oidcTokenType ? { tokenType: config.oidcTokenType } : {}),
+    }, dependencies.oidcFetcher);
+    try { await oidc.refresh(); } catch (error) { throw new Error('OIDC JWKS bootstrap failed', { cause: error }); }
+    authenticators.push(oidc);
+  }
+  const configuredAuthenticator = authenticators.length === 1 ? authenticators[0] : authenticators.length > 1 ? new CompositeAuthenticator(authenticators) : undefined;
+  const authenticator = dependencies.authenticator ?? configuredAuthenticator;
   if (config.environment === 'production' && !config.allowUnauthenticated && !authenticator) {
     throw new Error('Production requires COSMY_API_CREDENTIALS or explicit ALLOW_UNAUTHENTICATED=true');
   }
-  if (classifierMode === 'fail' && !availableClassifier) throw new Error('DEEPSEEK_API_KEY is required when CLASSIFIER_MODE=fail');
+  if (classifierMode === 'fail' && !availableClassifier) throw new Error('TYPESAFE_API_KEY is required when CLASSIFIER_MODE=fail');
   let postgres: PostgresSqlClient | undefined;
   let rolloutPostgres: PostgresSqlClient | undefined;
   let shadowPostgres: PostgresSqlClient | undefined;
@@ -125,6 +145,7 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     classifierTimeoutMs: config.classifierTimeoutMs ?? 3_000,
     failureMode: classifierMode === 'fail' ? 'fail' : 'degrade',
     admission: rolloutRegistry,
+    health: health as import('./ports/stores.js').HealthSnapshotStore,
   });
   const rolloutObserver = controlStore ? {
     recordOutcome: async (outcome: RolloutOutcome) => {
@@ -144,7 +165,10 @@ export async function buildApp(inputConfig: AppConfigInput = {}, dependencies: A
     : undefined;
   const registryVersion = () => (registry as { currentSnapshot?: () => { version: number } }).currentSnapshot?.().version;
   const idempotency = dependencies.idempotency ?? (postgres ? new PostgresIdempotencyStore(postgres) : new InMemoryIdempotencyStore());
-  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator), readyCheck, authenticator);
+  const decisions = dependencies.decisions ?? new InMemoryDecisionStore();
+  registerRoutes(app, new RouterService(router, executor, cache, config.responseCacheTtlSeconds, registryVersion, idempotency, config.idempotencyTtlSeconds ?? 86_400, metrics, shadowCoordinator, decisions), readyCheck, authenticator, {
+    visibleModels: (tenantId) => registry.snapshot().filter((model) => model.enabled && rolloutRegistry.allows(model, tenantId)),
+  });
   registerDiagnosticsRoute(app, async () => {
     const current = (registry as { currentSnapshot?: () => { version: number; source: string; createdAt: string } }).currentSnapshot?.();
     const models = registry.snapshot();
